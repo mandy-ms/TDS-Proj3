@@ -1096,7 +1096,7 @@ def write_a_fastapi_server_to_serve_data(csv_path, host: str = "127.0.0.1", port
     Creates and runs a FastAPI application that serves student data from a CSV file.
     
     Args:
-        csv_path (str): Path or URL to the CSV file containing student data
+        csv_path (str or UploadFile): Path, URL, or uploaded file object containing student data
         host (str): The host address to run the API on
         port (int): The port number to run the API on
         
@@ -1113,6 +1113,12 @@ def write_a_fastapi_server_to_serve_data(csv_path, host: str = "127.0.0.1", port
     from fastapi.middleware.cors import CORSMiddleware
     import uvicorn
     from utils.file_process import managed_file_upload
+    import logging
+    
+    # Set up logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    logger.info(f"Starting server with input type: {type(csv_path)}")
     
     # Check if port is already in use
     def is_port_in_use(port):
@@ -1122,15 +1128,17 @@ def write_a_fastapi_server_to_serve_data(csv_path, host: str = "127.0.0.1", port
     # Find an available port if the specified one is in use
     original_port = port
     while is_port_in_use(port):
-        print(f"Port {port} is already in use, trying next port")
+        logger.info(f"Port {port} is already in use, trying next port")
         port += 1
     
     if original_port != port:
-        print(f"Using port {port} instead of {original_port}")
+        logger.info(f"Using port {port} instead of {original_port}")
     
     try:
-        # Use managed_file_upload to handle both URLs and local files
+        # Use managed_file_upload to handle various input types
         with managed_file_upload(csv_path) as (extract_dir, filenames):
+            logger.info(f"Extracted directory: {extract_dir}, files: {filenames}")
+            
             # Check if we got an error message instead of a directory
             if isinstance(extract_dir, str) and extract_dir.startswith("Error"):
                 return extract_dir
@@ -1146,13 +1154,19 @@ def write_a_fastapi_server_to_serve_data(csv_path, host: str = "127.0.0.1", port
                     break
             
             # If no specific .csv file found, use the first file
-            if not csv_file:
+            if not csv_file and filenames:
                 csv_file = os.path.join(extract_dir, filenames[0])
+                logger.info(f"No CSV file found, using first file: {csv_file}")
             
+            if not csv_file:
+                return "Error: No valid file found to process"
+                
             # Verify file is a valid CSV
             try:
                 students_df = pd.read_csv(csv_file)
+                logger.info(f"Successfully loaded CSV with {len(students_df)} rows")
             except Exception as e:
+                logger.error(f"Failed to read CSV: {str(e)}")
                 return f"Error: File is not a valid CSV: {str(e)}"
                 
             # Create the FastAPI application
@@ -1179,7 +1193,6 @@ def write_a_fastapi_server_to_serve_data(csv_path, host: str = "127.0.0.1", port
                 Fetch student data from the CSV. If 'class' query parameters are provided,
                 filter students by those classes.
                 """
-                # Since we already read the CSV in setup, use the DataFrame
                 # Apply class filter if provided
                 if class_:
                     filtered_df = students_df[students_df["class"].isin(class_)]
@@ -1194,9 +1207,9 @@ def write_a_fastapi_server_to_serve_data(csv_path, host: str = "127.0.0.1", port
             api_url = f"http://localhost:{port}/api"
             
             # Print a message with the URL and example usage
-            print(f"Starting student API server at: {api_url}")
-            print(f"Example usage: {api_url}?class=1A&class=1B")
-            print(f"Using CSV file at: {csv_file}")
+            logger.info(f"Starting student API server at: {api_url}")
+            logger.info(f"Example usage: {api_url}?class=1A&class=1B")
+            logger.info(f"Using CSV file at: {csv_file}")
             
             # Start the server in a separate thread
             def run_server():
@@ -1210,7 +1223,7 @@ def write_a_fastapi_server_to_serve_data(csv_path, host: str = "127.0.0.1", port
                     server = uvicorn.Server(uvicorn_config)
                     server.run()
                 except Exception as e:
-                    print(f"Server error: {e}")
+                    logger.error(f"Server error: {e}")
             
             server_thread = threading.Thread(target=run_server, daemon=True)
             server_thread.start()
@@ -1222,8 +1235,8 @@ def write_a_fastapi_server_to_serve_data(csv_path, host: str = "127.0.0.1", port
             return api_url
     
     except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
         return f"Error: {str(e)}"
-
 
 def run_a_local_llm_with_llamafile():
     return ""

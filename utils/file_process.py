@@ -7,10 +7,24 @@ import requests
 from pathlib import Path
 from urllib.parse import urlparse
 from contextlib import contextmanager
-from PIL import Image  # Still needed for image validation if desired
+from fastapi import UploadFile
 
-# Single directory for all temporary files
-TMP_DIR = Path("/tmp") if os.environ.get("VERCEL") else Path("tmp_uploads")
+# Keep existing environment detection
+is_scalingo = os.environ.get("SCALINGO_ENVIRONMENT") is not None
+is_vercel = os.environ.get("VERCEL") == '1' or os.environ.get("VERCEL_ENV") is not None
+
+# Use absolute path for cloud environments
+if is_scalingo or is_vercel:
+    TMP_DIR = Path("/tmp")
+else:
+    TMP_DIR = Path("tmp_uploads")
+
+# Ensure directory exists with proper permissions
+os.makedirs(TMP_DIR, exist_ok=True)
+try:
+    os.chmod(TMP_DIR, 0o777)
+except Exception as e:
+    print(f"Warning: Could not set permissions on {TMP_DIR}: {e}")
 
 def is_url(path_or_url):
     """Check if the provided string is a URL."""
@@ -21,6 +35,27 @@ def is_url(path_or_url):
         return all([result.scheme, result.netloc])
     except:
         return False
+
+def is_upload_file(obj):
+    """Check if the object is a FastAPI UploadFile."""
+    return isinstance(obj, UploadFile)
+
+def save_upload_file(upload_file):
+    """Save an uploaded file and return the path."""
+    file_path = TMP_DIR / f"upload_{str(uuid.uuid4())[:8]}_{upload_file.filename}"
+    
+    try:
+        # Read the content and save it
+        content = upload_file.file.read()
+        with open(file_path, 'wb') as f:
+            f.write(content)
+        
+        # Reset the file pointer for potential reuse
+        upload_file.file.seek(0)
+        
+        return file_path
+    except Exception as e:
+        raise Exception(f"Error saving uploaded file: {str(e)}")
 
 def download_file(url):
     """Download a file from a URL to a temporary location and return its path."""
@@ -33,47 +68,65 @@ def download_file(url):
     
     download_path = TMP_DIR / f"download_{str(uuid.uuid4())[:8]}_{filename}"
     
-    # Download the file
-    response = requests.get(url, stream=True)
-    response.raise_for_status()
-    
-    with open(download_path, 'wb') as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            f.write(chunk)
-    
-    return download_path
+    try:
+        # Download the file
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        
+        with open(download_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        
+        return download_path
+    except PermissionError:
+        raise Exception(f"Permission denied when writing to {download_path}. Check directory permissions.")
+    except Exception as e:
+        raise Exception(f"Error downloading file: {str(e)}")
 
 @contextmanager
-def managed_file_upload(file_path_or_url):
+def managed_file_upload(file_input):
     """
-    Context manager that processes an uploaded file or URL and cleans up after it's used.
+    Enhanced context manager that processes a file input which can be:
+    - A path to a file (string)
+    - A URL to download (string)
+    - A FastAPI UploadFile object
     
     Args:
-        file_path_or_url: Path to the uploaded file or URL to download
+        file_input: File path, URL, or UploadFile object
         
     Yields:
         tuple: (directory path, list of filenames)
     """
     temp_download = None
+    temp_upload = None
     output_dir = None
     filenames = []
     
     try:
-        # Handle URL if provided
-        if is_url(file_path_or_url):
+        # Case 1: URL handling
+        if is_url(file_input):
             try:
-                temp_download = download_file(file_path_or_url)
+                temp_download = download_file(file_input)
                 file_path = temp_download
             except Exception as e:
                 yield str(e), []
                 return
+        
+        # Case 2: UploadFile handling
+        elif is_upload_file(file_input):
+            try:
+                temp_upload = save_upload_file(file_input)
+                file_path = temp_upload
+            except Exception as e:
+                yield str(e), []
+                return
+        
+        # Case 3: File path handling
         else:
-            file_path = Path(file_path_or_url)
+            file_path = Path(file_input)
         
-        # Create unique session ID to avoid filename conflicts
+        # Rest of your existing code for processing the file
         session_id = str(uuid.uuid4())[:8]
-        
-        # Ensure tmp directory exists
         os.makedirs(TMP_DIR, exist_ok=True)
         
         if zipfile.is_zipfile(file_path):
@@ -91,19 +144,18 @@ def managed_file_upload(file_path_or_url):
             shutil.copy2(file_path, dest_path)
             filenames = [os.path.basename(str(dest_path))]
         
-        # Yield the results for the caller to use
         yield str(output_dir), filenames
         
     finally:
-        # Clean up downloaded file if it exists
-        if temp_download and os.path.exists(temp_download):
-            os.remove(temp_download)
-            
+        # Clean up temporary files
+        for temp_file in [temp_download, temp_upload]:
+            if temp_file and os.path.exists(temp_file):
+                os.remove(temp_file)
+        
         # Clean up extracted/copied files
         if output_dir and output_dir.exists() and output_dir != TMP_DIR:
             shutil.rmtree(output_dir)
         elif output_dir == TMP_DIR:
-            # Just remove the specific files we created
             for filename in filenames:
                 file_to_remove = output_dir / filename
                 if file_to_remove.exists():
@@ -158,3 +210,12 @@ def process_uploaded_file(file_path_or_url):
         # Clean up downloaded file if needed but not the processed result
         if temp_download and os.path.exists(temp_download):
             os.remove(temp_download)
+
+def check_disk_space():
+    """Check if there's enough disk space available."""
+    import shutil
+    stats = shutil.disk_usage("/tmp")
+    free_mb = stats.free / (1024 * 1024)
+    if free_mb < 50:  # Less than 50MB free
+        return False
+    return True
