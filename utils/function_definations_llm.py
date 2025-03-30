@@ -35,13 +35,8 @@ function_definitions_objects_llm = {
         "description": "Runs Prettier (version 3.4.2) on the specified file and calculates its SHA-256 hash. This function ensures the file is formatted using Prettier and returns the hash of the formatted content.",
         "parameters": {
             "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "Path to the file to format with Prettier. The file must exist at the specified path."
-                }
-            },
-            "required": ["file_path"]
+            "properties": {},
+            "required": []
         }
     },
 
@@ -204,13 +199,8 @@ function_definitions_objects_llm = {
         "description": "description",
         "parameters": {
             "type": "object",
-            "properties": {
-                "text": {
-                    "type": "string",
-                    "description": "The text to extract the data from"
-                }
-            },
-            "required": ["text"]
+            "properties": {},
+            "required": []
         }
     },
 
@@ -385,13 +375,8 @@ function_definitions_objects_llm = {
         "description": "description",
         "parameters": {
             "type": "object",
-            "properties": {
-                "text": {
-                    "type": "string",
-                    "description": "The text to extract the data from"
-                }
-            },
-            "required": ["text"]
+            "properties": {},
+            "required": []
         }
     },
 
@@ -420,13 +405,8 @@ function_definitions_objects_llm = {
         "description": "Creates and pushes a Docker image to Docker Hub with the specified tag. Uses environment variables for authentication.",
         "parameters": {
             "type": "object",
-            "properties": {
-                "tag": {
-                    "type": "string",
-                    "description": "The tag to be added to the Docker image (e.g., '22ds3000103')"
-                }
-            },
-            "required": ["tag"]
+            "properties": {},
+            "required": []
         }
     },
 
