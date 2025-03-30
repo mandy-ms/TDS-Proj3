@@ -722,7 +722,7 @@ print(f"Average Steps: {average_steps}")
 '''
 
 
-def compress_an_image(image_path):
+def compress_an_image(image_path=None):
     """
     Compresses an image losslessly to be under 1,500 bytes and returns it as base64.
     Every pixel in the compressed image should match the original image.
@@ -734,10 +734,24 @@ def compress_an_image(image_path):
         str: Base64 encoded compressed image or error message
     """
     try:
+        import os
         from PIL import Image
         import io
         import base64
+        import numpy as np
         from utils.file_process import managed_file_upload
+        
+        # Check if image_path is None or empty
+        if not image_path:
+            # Look for common image filenames in the current directory
+            common_names = ['image.jpg', 'image.png', 'input.jpg', 'input.png', 'test.jpg', 'test.png']
+            for name in common_names:
+                if os.path.exists(name):
+                    image_path = name
+                    break
+            
+            if not image_path:
+                return "Error: No image path provided. Please specify a valid image file path or URL."
         
         # Use managed_file_upload to handle both URLs and local files
         with managed_file_upload(image_path) as (extract_dir, filenames):
@@ -748,55 +762,165 @@ def compress_an_image(image_path):
             if not filenames:
                 return "Error: No files found in the upload"
             
-            # Look for image files in the extracted content
+            # Look for image files in the extracted content (including subdirectories)
             image_file = None
+            
+            # First, check files directly in the main directory
             for filename in filenames:
                 lower_filename = filename.lower()
-                if any(lower_filename.endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']):
+                if any(lower_filename.endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff']):
                     image_file = os.path.join(extract_dir, filename)
                     break
+            
+            # If not found, recursively search subdirectories
+            if not image_file:
+                for root, _, files in os.walk(extract_dir):
+                    for filename in files:
+                        lower_filename = filename.lower()
+                        if any(lower_filename.endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff']):
+                            image_file = os.path.join(root, filename)
+                            break
+                    if image_file:
+                        break
+            
+            # If still not found, use the first file (assuming it might be an image)
+            if not image_file and filenames:
+                image_file = os.path.join(extract_dir, filenames[0])
             
             if not image_file:
                 return "Error: No image file found in the upload"
             
-            # Open the image
-            with Image.open(image_file) as img:
-                original_size = img.size
-                original_mode = img.mode
-                
-                # Try various compression strategies while maintaining pixel-perfect quality
-                
-                # Method 1: Try with palette mode (lossless for simple images)
-                for colors in [8, 16, 32, 64, 128, 256]:
-                    palette_img = img.convert("P", palette=Image.ADAPTIVE, colors=colors)
+            # Open and validate the image
+            try:
+                with Image.open(image_file) as img:
+                    # Store original image data for verification
+                    original_array = np.array(img)
                     
-                    buffer = io.BytesIO()
-                    palette_img.save(buffer, format="PNG", optimize=True, compress_level=9)
-                    file_size = buffer.tell()
+                    # Try various compression strategies while maintaining pixel-perfect quality
+                    compression_methods = [
+                        # Method 1: Palette mode with different color counts
+                        lambda img: try_palette_compression(img),
+                        
+                        # Method 2: WebP with lossless compression
+                        lambda img: try_webp_compression(img),
+                        
+                        # Method 3: PNG with different optimization settings
+                        lambda img: try_png_optimization(img),
+                    ]
                     
-                    if file_size <= 1500:
-                        # Success! Return as base64
-                        buffer.seek(0)
-                        base64_image = base64.b64encode(buffer.read()).decode('utf-8')
-                        return base64_image
-                
-                # Method 2: Try WebP with lossless compression
-                buffer = io.BytesIO()
-                img.save(buffer, format="WEBP", lossless=True, quality=1, method=6)
-                file_size = buffer.tell()
-                
-                if file_size <= 1500:
-                    buffer.seek(0)
-                    base64_image = base64.b64encode(buffer.read()).decode('utf-8')
-                    return base64_image
+                    for compress_method in compression_methods:
+                        result = compress_method(img)
+                        if result:
+                            # Verify the compression was truly lossless
+                            if verify_lossless(result, original_array):
+                                return result
+                            else:
+                                print("Compression appeared successful but verification failed")
                     
-                # If we get here, we couldn't compress enough without losing quality
-                return "Error: Image could not be compressed to under 1,500 bytes without losing quality"
-                    
-    except ImportError:
-        return "Error: Required libraries (PIL) not available"
+                    return "Error: Image could not be compressed to under 1,500 bytes without losing quality"
+            except Exception as e:
+                return f"Error processing image: {str(e)}"
+    
+    except ImportError as e:
+        return f"Error: Required library not available - {str(e)}"
     except Exception as e:
         return f"Error during compression: {str(e)}"
+
+def try_palette_compression(img):
+    """Try compressing using palette mode with different color counts."""
+    import io
+    import base64
+    
+    # Convert to RGB if in RGBA mode to avoid transparency issues
+    if img.mode == 'RGBA':
+        background = Image.new('RGB', img.size, (255, 255, 255))
+        background.paste(img, mask=img.split()[3])  # Use alpha channel as mask
+        img = background
+    
+    for colors in [8, 16, 32, 64, 128, 256]:
+        palette_img = img.convert("P", palette=Image.ADAPTIVE, colors=colors)
+        
+        buffer = io.BytesIO()
+        palette_img.save(buffer, format="PNG", optimize=True, compress_level=9)
+        file_size = buffer.tell()
+        
+        if file_size <= 1500:
+            buffer.seek(0)
+            base64_image = base64.b64encode(buffer.read()).decode('utf-8')
+            return base64_image
+    
+    return None
+
+def try_webp_compression(img):
+    """Try compressing using WebP with lossless settings."""
+    import io
+    import base64
+    
+    buffer = io.BytesIO()
+    img.save(buffer, format="WEBP", lossless=True, quality=1, method=6)
+    file_size = buffer.tell()
+    
+    if file_size <= 1500:
+        buffer.seek(0)
+        base64_image = base64.b64encode(buffer.read()).decode('utf-8')
+        return base64_image
+    
+    return None
+
+def try_png_optimization(img):
+    """Try advanced PNG optimization."""
+    import io
+    import base64
+    
+    # Try different optimization levels
+    for compress_level in range(9, 0, -1):
+        buffer = io.BytesIO()
+        img.save(buffer, format="PNG", optimize=True, compress_level=compress_level)
+        file_size = buffer.tell()
+        
+        if file_size <= 1500:
+            buffer.seek(0)
+            base64_image = base64.b64encode(buffer.read()).decode('utf-8')
+            return base64_image
+    
+    return None
+
+def verify_lossless(base64_image, original_array):
+    """Verify the compressed image is visually identical to the original."""
+    import io
+    import base64
+    from PIL import Image
+    import numpy as np
+    
+    try:
+        # Decode the base64 string
+        image_data = base64.b64decode(base64_image)
+        
+        # Open the compressed image
+        buffer = io.BytesIO(image_data)
+        compressed_img = Image.open(buffer)
+        
+        # Convert to array for comparison
+        compressed_array = np.array(compressed_img)
+        
+        # If image modes were different, shapes might differ - convert if needed
+        if compressed_array.shape != original_array.shape:
+            # Handle differences in array shape due to format conversion
+            if len(compressed_array.shape) == 2 and len(original_array.shape) == 3:
+                # Convert grayscale to RGB for comparison
+                compressed_array = np.stack((compressed_array,) * 3, axis=-1)
+            elif len(compressed_array.shape) == 3 and compressed_array.shape[2] == 3 and original_array.shape[2] == 4:
+                # Compare only RGB channels if original had alpha
+                original_array = original_array[:,:,:3]
+                
+        # Verify images are identical (allowing for small differences due to color format conversions)
+        if compressed_array.shape == original_array.shape:
+            # Perfect match required for lossless compression
+            return np.array_equal(compressed_array, original_array)
+    except Exception as e:
+        print(f"Verification error: {str(e)}")
+    
+    return False
 
 def host_your_portfolio_on_github_pages(email):
     urls = {

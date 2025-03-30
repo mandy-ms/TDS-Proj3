@@ -1,37 +1,43 @@
 # API and HTTP
-Flask==3.1.0
-httpx==0.28.1
-requests==2.32.3
+httpx
+requests
+fastapi
+uvicorn
+python-multipart
 
 # Data processing
-numpy==2.2.4
-scikit-learn==1.6.1
-scipy==1.15.2  # Required by scikit-learn
-pandas==2.2.3
-python-dateutil==2.9.0.post0  # Required by pandas
-six==1.17.0  # Required by python-dateutil
-tzdata==2025.2  # Required by pandas
+numpy
+scikit-learn
+scipy  # Required by scikit-learn
+pandas
+python-dateutil.post0  # Required by pandas
+six  # Required by python-dateutil
+tzdata Required by pandas
+
 
 # Image handling
-Pillow>=10.3.0
+Pillow
 
 # Time zones and date handling
-pytz==2025.1
-
-# Geolocation
-geopy==2.4.1
+pytz# Geolocation
+geopy
 
 # RSS feed parsing
-# feedparser==6.0.10  # Not compatible with Python 3.13 (uses removed cgi module)
-atoma==0.0.17  # Alternative RSS/Atom parser compatible with Python 3.13
+# feedparser  # Not compatible with Python 3.13 (uses removed cgi module)
+atoma  # Alternative RSS/Atom parser compatible with Python 3.13
 
 # HTML parsing
-bs4==0.0.2
+bs4
+beautifulsoup4
 
 # Document processing
-PyPDF2==3.0.1  # PDF processing and text extraction
+PyPDF2  # PDF processing and text extraction
 
 # Environment management
-python-dotenv==1.0.1
+python-dotenv
 
-lxml==4.9.3  # XML/HTML processing library, needed for HTML table parsing
+lxml  # XML/HTML processing library, needed for HTML table parsing
+
+fuzzywuzzy
+python-Levenshtein
+python-jose[cryptography]
