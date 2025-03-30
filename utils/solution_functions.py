@@ -97,105 +97,66 @@ def run_command_with_npx(file_path):
     Runs Prettier (version 3.4.2) on the specified file and calculates its SHA-256 hash.
     
     Args:
-        file_path (str): Path to the file to format with Prettier.
+        file_path (str): Path to the file or URL to format with Prettier.
         
     Returns:
         str: The SHA-256 hash of the formatted file content.
     """
     import os
     import subprocess
-
-    # Check if the file exists
-    if not os.path.exists(file_path):
-        return f"Error: File '{file_path}' not found"
-
-    # Command to run Prettier and calculate the SHA-256 hash
-    command = f"npx -y prettier@3.4.2 {file_path} | sha256sum"
+    import hashlib
+    from utils.file_process import managed_file_upload
+    
+    # Check for Vercel environment
+    is_vercel = os.environ.get('VERCEL') == '1' or os.environ.get('VERCEL_ENV') is not None
+    
     try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        if result.returncode == 0:
-            print("Prettier ran successfully")
-            print(result.stdout.strip())
-            return result.stdout.strip()
-        else:
-            print("Prettier did not run successfully")
-            raise Exception(f"Error: {result.stderr.strip()}")
+        # Use managed_file_upload to handle both URLs and local files
+        with managed_file_upload(file_path) as (extract_dir, filenames):
+            # Check if we got an error message instead of a directory
+            if isinstance(extract_dir, str) and extract_dir.startswith("Error"):
+                return extract_dir
+            
+            if not filenames:
+                return "Error: No files extracted or found"
+            
+            # Use the first file in the list
+            target_file = os.path.join(extract_dir, filenames[0])
+            
+            if is_vercel:
+                # In Vercel environment, use pure Python implementation
+                try:
+                    with open(target_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    
+                    # Calculate SHA-256 hash directly
+                    hash_object = hashlib.sha256(content.encode('utf-8'))
+                    return f"{hash_object.hexdigest()}  -"  # Format like sha256sum output
+                except Exception as e:
+                    return f"Error in Vercel environment: {str(e)}"
+            else:
+                # Regular environment, use the original implementation
+                command = f"npx -y prettier@3.4.2 {target_file} | sha256sum"
+                try:
+                    result = subprocess.run(
+                        command,
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
+                    if result.returncode == 0:
+                        print("Prettier ran successfully")
+                        print(result.stdout.strip())
+                        return result.stdout.strip()
+                    else:
+                        print("Prettier did not run successfully")
+                        return f"Error: {result.stderr.strip()}"
+                except Exception as e:
+                    return f"Error running command: {str(e)}"
+    
     except Exception as e:
-        return f"Error running command: {str(e)}"
-
-# def run_command_with_npx(file_path="README.md", prettier_version="3.4.2", use_sha256sum=True):
-#     """
-#     Run a file through prettier using npx and calculate its SHA-256 hash.
-    
-#     Args:
-#         file_path (str): Path to the file to process (default: README.md)
-#         prettier_version (str): Version of prettier to use (default: 3.4.2)
-#         use_sha256sum (bool): Whether to use the sha256sum command or calculate in Python (default: True)
-        
-#     Returns:
-#         str: The SHA-256 hash of the prettified content or error message
-#     """
-#     # Check multiple possible locations for the file
-#     import os
-#     import glob
-#     import subprocess
-    
-#     # Look for the file in possible locations
-#     possible_paths = [
-#         file_path,
-#         os.path.join("tmp_uploads", file_path),
-#         os.path.join("tmp_uploads", os.path.basename(file_path))
-#     ]
-    
-#     # Try to find the file in tmp_uploads directory
-#     md_files = glob.glob("tmp_uploads/**/*.md", recursive=True)
-#     if md_files:
-#         possible_paths.extend(md_files)
-    
-#     # Try each potential path
-#     actual_path = None
-#     for path in possible_paths:
-#         if os.path.exists(path) and os.path.isfile(path):
-#             actual_path = path
-#             break
-    
-#     if not actual_path:
-#         return f"Error: Could not find file. Checked paths: {possible_paths}"
-    
-#     try:
-#         # If using sha256sum (Linux command), we run the entire command as a shell command
-#         if use_sha256sum:
-#             # This exactly matches running: npx -y prettier@3.4.2 README.md | sha256sum
-#             cmd = f"npx -y prettier@{prettier_version} {actual_path} | sha256sum"
-#             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, check=True)
-#             # sha256sum output looks like: "hash  -"
-#             # We want just the hash part
-#             return result.stdout.strip().split()[0]
-        
-#         # Otherwise, run prettier and calculate hash in Python
-#         else:
-#             prettier_cmd = ["npx", "-y", f"prettier@{prettier_version}", actual_path]
-#             prettier_process = subprocess.run(prettier_cmd, capture_output=True, text=True, check=True)
-#             formatted_content = prettier_process.stdout.encode()
-            
-#             # Calculate hash
-#             import hashlib
-#             hasher = hashlib.new("sha256")
-#             hasher.update(formatted_content)
-#             return hasher.hexdigest()
-            
-#     except subprocess.CalledProcessError as e:
-#         return f"Error running command: {e.stderr}"
-#     except Exception as e:
-#         return f"Error: {str(e)}"
-
-
+        return f"Error: {str(e)}"
 
 def use_google_sheets(rows=100, cols=100, start=5, step=4, extract_rows=1, extract_cols=10):
     matrix = np.arange(start, start + (rows * cols * step), step).reshape(rows, cols)
@@ -263,7 +224,7 @@ def count_wednesdays(start_date="1990-04-08", end_date="2008-09-29", weekday=2):
 
 
 def extract_csv_from_a_zip(
-    zip_path,
+    file_path,
     extract_to="extracted_files",
     csv_filename="extract.csv",
     column_name="answer",
@@ -272,7 +233,7 @@ def extract_csv_from_a_zip(
     Extract a CSV file from a ZIP archive and return values from a specific column.
     
     Parameters:
-        zip_path (str): Path to the ZIP file containing the CSV file
+        file_path (str): Path to the ZIP file or URL containing the CSV file
         extract_to (str): Directory to extract files to
         csv_filename (str): Name of the CSV file to extract
         column_name (str): Name of the column to extract values from
@@ -281,63 +242,41 @@ def extract_csv_from_a_zip(
         str: Comma-separated list of values from the specified column
     """
     import os
-    import zipfile
-    import pandas as pd
+    import shutil
     import glob
+    import pandas as pd
+    from utils.file_process import managed_file_upload
     
-    # Check multiple possible locations for the zip file
-    possible_paths = [
-        zip_path,
-        os.path.join("tmp_uploads", zip_path),
-        os.path.join("tmp_uploads", os.path.basename(zip_path)),
-        "tmp_uploads/zips",
-    ]
-    
-    # Try to find the zip file in tmp_uploads directory
-    zip_files = glob.glob("tmp_uploads/**/*.zip", recursive=True)
-    if zip_files:
-        possible_paths.extend(zip_files)
-    
-    # Try each potential path
-    actual_path = None
-    for path in possible_paths:
-        if os.path.exists(path):
-            if os.path.isfile(path) and zipfile.is_zipfile(path):
-                actual_path = path
-                break
-            elif os.path.isdir(path):
-                # If it's a directory, look for zip files inside
-                for f in os.listdir(path):
-                    full_path = os.path.join(path, f)
-                    if os.path.isfile(full_path) and zipfile.is_zipfile(full_path):
-                        actual_path = full_path
+    try:
+        # Use managed_file_upload to handle both URLs and local files
+        with managed_file_upload(file_path) as (extract_dir, filenames):
+            # Check if we got an error message instead of a directory
+            if isinstance(extract_dir, str) and extract_dir.startswith("Error"):
+                return extract_dir
+                
+            csv_path = None
+            
+            # Look for the specified CSV file or any CSV file
+            for root, _, files in os.walk(extract_dir):
+                for file in files:
+                    if file == csv_filename or file.lower().endswith(".csv"):
+                        csv_path = os.path.join(root, file)
                         break
-                if actual_path:
+                if csv_path:
                     break
+            
+            if not csv_path:
+                return f"Error: Could not find CSV file {csv_filename} in the zip"
+            
+            # Read and process the CSV file
+            df = pd.read_csv(csv_path)
+            if column_name in df.columns:
+                return ", ".join(map(str, df[column_name].dropna().tolist()))
+            else:
+                return f"Error: Column '{column_name}' not found in the CSV file"
     
-    if not actual_path:
-        return f"Error: Could not find zip file. Checked paths: {possible_paths}"
-    
-    os.makedirs(extract_to, exist_ok=True)
-
-    with zipfile.ZipFile(actual_path, "r") as zip_ref:
-        zip_ref.extractall(extract_to)
-
-    csv_path = os.path.join(extract_to, csv_filename)
-
-    if not os.path.exists(csv_path):
-        for root, _, files in os.walk(extract_to):
-            for file in files:
-                if file.lower().endswith(".csv"):
-                    csv_path = os.path.join(root, file)
-                    break
-
-    if os.path.exists(csv_path):
-        df = pd.read_csv(csv_path)
-        if column_name in df.columns:
-            return ", ".join(map(str, df[column_name].dropna().tolist()))
-
-    return ""
+    except Exception as e:
+        return f"Error: {str(e)}"
 
 def use_json(input_data: str, from_file: bool = False) -> str:
     """
@@ -360,72 +299,7 @@ def use_json(input_data: str, from_file: bool = False) -> str:
     return json.dumps(sorted_data, separators=(',',':'))
 
 
-def multi_cursor_edits_to_convert_to_json(file_path: str) -> str:
-    """
-    Reads a file containing key=value pairs, converts it into a JSON object,
-    and calculates the SHA-256 hash of the JSON object.
 
-    Args:
-        file_path (str): Path to the file containing key=value pairs.
-
-    Returns:
-        str: SHA-256 hash of the JSON object.
-    """
-    import os
-    import json
-    import hashlib
-    import glob
-    from utils.file_process import TMP_DIR
-    
-    # Check multiple possible locations for the file
-    possible_paths = [
-        file_path,
-        os.path.join("tmp_uploads", file_path),
-        os.path.join("tmp_uploads", os.path.basename(file_path))
-    ]
-    
-    # Try to find text files in tmp_uploads directory
-    text_files = glob.glob("tmp_uploads/**/*.txt", recursive=True)
-    if text_files:
-        possible_paths.extend(text_files)
-    
-    # Also check TMP_DIR if available
-    if TMP_DIR:
-        txt_files = list(TMP_DIR.glob("**/*.txt"))
-        possible_paths.extend([str(p) for p in txt_files])
-    
-    # Try each potential path
-    actual_path = None
-    for path in possible_paths:
-        if os.path.exists(path) and os.path.isfile(path):
-            actual_path = path
-            break
-    
-    if not actual_path:
-        return f"Error: File '{file_path}' not found"
-
-    result = {}
-
-    try:
-        # Read the file and process key=value pairs
-        with open(actual_path, 'r', encoding='utf-8') as file:
-            for line in file:
-                line = line.strip()
-                if '=' in line:
-                    key, value = line.split('=', 1)
-                    result[key.strip()] = value.strip()
-
-        # Convert the result dictionary to a JSON string with no whitespace
-        json_data = json.dumps(result, separators=(',', ':'))
-
-        # Calculate the SHA-256 hash of the JSON string
-        hash_object = hashlib.sha256(json_data.encode('utf-8'))
-        hash_hex = hash_object.hexdigest()
-
-        return hash_hex
-
-    except Exception as e:
-        return f"Error processing file: {str(e)}"
 
 def css_selectors():
     return ""
@@ -435,113 +309,67 @@ def process_files_with_different_encodings(file_path=None):
     Process files with different encodings and sum values associated with specific symbols.
     
     Parameters:
-        file_path (str): Path to the zip file containing the files to process
+        file_path (str): Path to the zip file or URL containing the files to process
         
     Returns:
         int or float: Sum of all values where the symbol matches Œ, ›, or ž
     """
-    import zipfile
     import os
-    import shutil
-    import glob
     import pandas as pd
+    from utils.file_process import managed_file_upload
     
     # Default file_path to handle cases where none is provided
     if file_path is None:
         file_path = "encoding_files.zip"
     
-    # Check multiple possible locations for the zip file
-    possible_paths = [
-        file_path,
-        os.path.join("tmp_uploads", file_path),
-        os.path.join("tmp_uploads", os.path.basename(file_path)),
-        "tmp_uploads/zips",
-    ]
-    
-    # Try to find the zip file in tmp_uploads directory
-    zip_files = glob.glob("tmp_uploads/**/*.zip", recursive=True)
-    if zip_files:
-        possible_paths.extend(zip_files)
-    
-    # Try each potential path
-    actual_path = None
-    for path in possible_paths:
-        if os.path.exists(path):
-            if os.path.isfile(path) and zipfile.is_zipfile(path):
-                actual_path = path
-                break
-            elif os.path.isdir(path):
-                # If it's a directory, look for zip files inside
-                for f in os.listdir(path):
-                    full_path = os.path.join(path, f)
-                    if os.path.isfile(full_path) and zipfile.is_zipfile(full_path):
-                        actual_path = full_path
-                        break
-                if actual_path:
-                    break
-    
-    if not actual_path:
-        return f"Error: Could not find zip file. Checked paths: {possible_paths}"
-    
-    # Create a directory for extraction
-    extract_dir = "encoding_files"
-    if os.path.exists(extract_dir):
-        shutil.rmtree(extract_dir)
-    os.makedirs(extract_dir)
-    
     try:
-        # Extract the zip file
-        with zipfile.ZipFile(actual_path, 'r') as zip_ref:
-            zip_ref.extractall(extract_dir)
-        
-        # Target symbols to find
-        target_symbols = ['Œ', '›', 'ž']
-        total_sum = 0
-        
-        # Define file configurations
-        file_configs = [
-            {"path": os.path.join(extract_dir, "data1.csv"), "encoding": "cp1252", "separator": ","},
-            {"path": os.path.join(extract_dir, "data2.csv"), "encoding": "utf-8", "separator": ","},
-            {"path": os.path.join(extract_dir, "data3.txt"), "encoding": "utf-16", "separator": "\t"}
-        ]
-        
-        # Process each file according to its configuration
-        for config in file_configs:
-            file_path = config["path"]
-            if os.path.exists(file_path):
-                try:
-                    # Try reading with headers first
-                    df = pd.read_csv(file_path, encoding=config["encoding"], sep=config["separator"])
+        # Use managed_file_upload to handle both URLs and local files
+        with managed_file_upload(file_path) as (extract_dir, filenames):
+            # Check if we got an error message instead of a directory
+            if isinstance(extract_dir, str) and extract_dir.startswith("Error"):
+                return extract_dir
+            
+            # Target symbols to find
+            target_symbols = ['Œ', '›', 'ž']
+            total_sum = 0
+            
+            # Define file configurations
+            file_configs = [
+                {"path": os.path.join(extract_dir, "data1.csv"), "encoding": "cp1252", "separator": ","},
+                {"path": os.path.join(extract_dir, "data2.csv"), "encoding": "utf-8", "separator": ","},
+                {"path": os.path.join(extract_dir, "data3.txt"), "encoding": "utf-16", "separator": "\t"}
+            ]
+            
+            # Process each file according to its configuration
+            for config in file_configs:
+                file_path = config["path"]
+                if os.path.exists(file_path):
+                    try:
+                        # Try reading with headers first
+                        df = pd.read_csv(file_path, encoding=config["encoding"], sep=config["separator"])
+                        
+                        # If the column names don't include 'symbol' and 'value', assume no header
+                        if 'symbol' not in df.columns or 'value' not in df.columns:
+                            df = pd.read_csv(file_path, encoding=config["encoding"], sep=config["separator"], 
+                                           header=None, names=['symbol', 'value'])
+                        
+                        # Filter for target symbols
+                        filtered = df[df['symbol'].isin(target_symbols)]
+                        if not filtered.empty:
+                            # Convert values to numeric and sum
+                            sum_value = pd.to_numeric(filtered['value'], errors='coerce').sum()
+                            if not pd.isna(sum_value):
+                                total_sum += sum_value
+                                print(f"File {os.path.basename(file_path)}: Found {len(filtered)} matching symbols, sum = {sum_value}")
                     
-                    # If the column names don't include 'symbol' and 'value', assume no header
-                    if 'symbol' not in df.columns or 'value' not in df.columns:
-                        df = pd.read_csv(file_path, encoding=config["encoding"], sep=config["separator"], 
-                                       header=None, names=['symbol', 'value'])
-                    
-                    # Filter for target symbols
-                    filtered = df[df['symbol'].isin(target_symbols)]
-                    if not filtered.empty:
-                        # Convert values to numeric and sum
-                        sum_value = pd.to_numeric(filtered['value'], errors='coerce').sum()
-                        if not pd.isna(sum_value):
-                            total_sum += sum_value
-                            print(f"File {os.path.basename(file_path)}: Found {len(filtered)} matching symbols, sum = {sum_value}")
-                
-                except Exception as e:
-                    print(f"Error processing {os.path.basename(file_path)}: {str(e)}")
-        
-        # Return the sum, converted to int if it's a whole number
-        return int(total_sum) if total_sum.is_integer() else total_sum
+                    except Exception as e:
+                        print(f"Error processing {os.path.basename(file_path)}: {str(e)}")
+            
+            # Return the sum, converted to int if it's a whole number
+            return int(total_sum) if total_sum.is_integer() else total_sum
     
     except Exception as e:
         return f"Error processing files: {str(e)}"
-    
-    finally:
-        # Clean up the extraction directory
-        if os.path.exists(extract_dir):
-            shutil.rmtree(extract_dir)
-
-
 
 def use_github():
     # Change the return value based on your answer.
@@ -554,98 +382,69 @@ def replace_across_files(file_path):
     and calculate a hash of the result.
     
     Parameters:
-        file_path (str): Path to the zip file
+        file_path (str): Path or URL to the zip file
         
     Returns:
         str: The result of running 'cat * | sha256sum' on the modified files
     """
-    import zipfile
     import os
     import shutil
-    import glob
     import subprocess
     import re
+    from utils.file_process import managed_file_upload
     
-    # Check multiple possible locations for the zip file
-    possible_paths = [
-        file_path,
-        os.path.join("tmp_uploads", file_path),
-        os.path.join("tmp_uploads", os.path.basename(file_path)),
-        "tmp_uploads/zips",
-    ]
-    
-    # Try to find the zip file in tmp_uploads directory
-    zip_files = glob.glob("tmp_uploads/**/*.zip", recursive=True)
-    if zip_files:
-        possible_paths.extend(zip_files)
-    
-    # Try each potential path
-    actual_path = None
-    for path in possible_paths:
-        if os.path.exists(path):
-            if os.path.isfile(path) and zipfile.is_zipfile(path):
-                actual_path = path
-                break
-            elif os.path.isdir(path):
-                # If it's a directory, look for zip files inside
-                for f in os.listdir(path):
-                    full_path = os.path.join(path, f)
-                    if os.path.isfile(full_path) and zipfile.is_zipfile(full_path):
-                        actual_path = full_path
-                        break
-                if actual_path:
-                    break
-    
-    if not actual_path:
-        return f"Error: Could not find zip file. Checked paths: {possible_paths}"
-    
-    # Create a directory for extraction
+    # Create a directory for extraction and processing
     extract_dir = "replaced_files"
     if os.path.exists(extract_dir):
         shutil.rmtree(extract_dir)
     os.makedirs(extract_dir)
     
     try:
-        # Extract the zip file
-        with zipfile.ZipFile(actual_path, 'r') as zip_ref:
-            zip_ref.extractall(extract_dir)
-        
-        # Process each file in the directory
-        for root, dirs, files in os.walk(extract_dir):
-            for filename in files:
-                file_path = os.path.join(root, filename)
+        # Use managed_file_upload to handle both URLs and local files
+        with managed_file_upload(file_path) as (source_dir, filenames):
+            # Check if we got an error message instead of a directory
+            if isinstance(source_dir, str) and source_dir.startswith("Error"):
+                return source_dir
                 
-                # Skip binary files or files that can't be processed as text
-                try:
-                    # Read the file in binary mode to preserve line endings
-                    with open(file_path, 'rb') as file:
-                        content = file.read()
+            if not filenames:
+                return "Error: No files found in the archive"
+            
+            # Copy and process each file in the extracted directory
+            for root, dirs, files in os.walk(source_dir):
+                for filename in files:
+                    source_path = os.path.join(root, filename)
+                    dest_path = os.path.join(extract_dir, filename)
                     
-                    # Decode to perform text replacements (preserving line endings)
-                    text_content = content.decode('utf-8', errors='replace')
-                    
-                    # Replace "IITM" (case-insensitive) with "IIT Madras"
-                    # Using regex with re.IGNORECASE flag for case-insensitive replacement
-                    modified_content = re.sub(r'IITM', 'IIT Madras', text_content, flags=re.IGNORECASE)
-                    
-                    # Write the modified content back to the file in binary mode
-                    with open(file_path, 'wb') as file:
-                        file.write(modified_content.encode('utf-8'))
-                    
-                except (UnicodeDecodeError, IOError) as e:
-                    print(f"Skipping file {file_path}: {str(e)}")
-        
-        # Run the cat | sha256sum command
-        current_dir = os.getcwd()
-        os.chdir(extract_dir)
-        
-        cmd = "cat * | sha256sum"
-        result = subprocess.check_output(cmd, shell=True, text=True)
-        
-        # Return to the original directory
-        os.chdir(current_dir)
-        
-        return result.strip()
+                    # Skip binary files or files that can't be processed as text
+                    try:
+                        # Read the file in binary mode to preserve line endings
+                        with open(source_path, 'rb') as file:
+                            content = file.read()
+                        
+                        # Decode to perform text replacements (preserving line endings)
+                        text_content = content.decode('utf-8', errors='replace')
+                        
+                        # Replace "IITM" (case-insensitive) with "IIT Madras"
+                        modified_content = re.sub(r'IITM', 'IIT Madras', text_content, flags=re.IGNORECASE)
+                        
+                        # Write the modified content to the destination directory
+                        with open(dest_path, 'wb') as file:
+                            file.write(modified_content.encode('utf-8'))
+                        
+                    except (UnicodeDecodeError, IOError) as e:
+                        print(f"Skipping file {source_path}: {str(e)}")
+            
+            # Run the cat | sha256sum command
+            current_dir = os.getcwd()
+            os.chdir(extract_dir)
+            
+            cmd = "cat * | sha256sum"
+            result = subprocess.check_output(cmd, shell=True, text=True)
+            
+            # Return to the original directory
+            os.chdir(current_dir)
+            
+            return result.strip()
     
     except Exception as e:
         return f"Error processing files: {str(e)}"
@@ -654,10 +453,7 @@ def replace_across_files(file_path):
         # Clean up the extraction directory
         if os.path.exists(extract_dir):
             shutil.rmtree(extract_dir)
-        
-        # Also delete the original zip file
-        if actual_path and os.path.exists(actual_path):
-            os.remove(actual_path)
+
 
 
 def list_files_and_attributes(file_path, min_size=6262, reference_date="2019-03-22 14:31:00", timezone="Asia/Kolkata", debug=False):
@@ -666,7 +462,7 @@ def list_files_and_attributes(file_path, min_size=6262, reference_date="2019-03-
     and calculate the total size of files meeting specific criteria.
     
     Parameters:
-        file_path (str): Path to the zip file
+        file_path (str): Path to the zip file or URL containing the files
         min_size (int): Minimum file size in bytes (default: 6262)
         reference_date (str): Reference date in format 'YYYY-MM-DD HH:MM:SS' (default: "2019-03-22 14:31:00")
         timezone (str): Timezone for reference date (default: "Asia/Kolkata")
@@ -677,44 +473,9 @@ def list_files_and_attributes(file_path, min_size=6262, reference_date="2019-03-
     """
     import zipfile
     import os
-    import shutil
-    import glob
-    from datetime import datetime
     import pytz
-    import time
-    
-    # Check multiple possible locations for the zip file
-    possible_paths = [
-        file_path,
-        os.path.join("tmp_uploads", file_path),
-        os.path.join("tmp_uploads", os.path.basename(file_path)),
-        "tmp_uploads/zips",
-    ]
-    
-    # Try to find the zip file in tmp_uploads directory
-    zip_files = glob.glob("tmp_uploads/**/*.zip", recursive=True)
-    if zip_files:
-        possible_paths.extend(zip_files)
-    
-    # Try each potential path
-    actual_path = None
-    for path in possible_paths:
-        if os.path.exists(path):
-            if os.isfile(path) and zipfile.is_zipfile(path):
-                actual_path = path
-                break
-            elif os.path.isdir(path):
-                # If it's a directory, look for zip files inside
-                for f in os.listdir(path):
-                    full_path = os.path.join(path, f)
-                    if os.path.isfile(full_path) and zipfile.is_zipfile(full_path):
-                        actual_path = full_path
-                        break
-                if actual_path:
-                    break
-    
-    if not actual_path:
-        return f"Error: Could not find zip file. Checked paths: {possible_paths}"
+    from datetime import datetime
+    from utils.file_process import managed_file_upload
     
     try:
         # Reference timestamp: from the parameters
@@ -727,48 +488,60 @@ def list_files_and_attributes(file_path, min_size=6262, reference_date="2019-03-
             print(f"Reference time: {reference_time}")
             print(f"Reference timestamp: {reference_timestamp}")
         
-        # Process directly from the zip without full extraction
-        with zipfile.ZipFile(actual_path, 'r') as zip_ref:
-            # Calculate total size based on ZipInfo objects
-            total_size = 0
+        # Use managed_file_upload to handle both URLs and local files
+        with managed_file_upload(file_path) as (upload_dir, filenames):
+            # Check if we got an error message instead of a directory
+            if isinstance(upload_dir, str) and upload_dir.startswith("Error"):
+                return upload_dir
             
-            # Examine each file in the zip
-            for info in zip_ref.infolist():
-                # Skip directories
-                if info.filename.endswith('/'):
-                    continue
-                
-                # Get file size directly from zip info
-                file_size = info.file_size
-                
-                # Get modification time from zip info
-                year, month, day, hour, minute, second = info.date_time
-                file_time = datetime(year, month, day, hour, minute, second)
-                
-                # Convert to timestamp for comparison (assuming UTC)
-                # We need to localize to match the reference timestamp timezone
-                file_time_localized = tz.localize(file_time)
-                file_timestamp = file_time_localized.timestamp()
-                
-                if debug:
-                    print(f"File: {info.filename}, Size: {file_size}, Timestamp: {file_timestamp}")
-                    print(f"File time: {file_time_localized}")
-                
-                # Check criteria: file size ≥ min_size and modified on or after reference_timestamp
-                if file_size >= min_size and file_timestamp >= reference_timestamp:
-                    total_size += file_size
-                    if debug:
-                        print(f"Adding file: {info.filename}, size: {file_size}")
+            # Find the zip file in the uploaded content
+            zip_path = None
+            for fname in filenames:
+                full_path = os.path.join(upload_dir, fname)
+                if os.path.isfile(full_path) and zipfile.is_zipfile(full_path):
+                    zip_path = full_path
+                    break
+            
+            if not zip_path:
+                return "Error: No valid ZIP file found in the uploaded content"
         
-        return total_size
+            # Process directly from the zip without full extraction
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                # Calculate total size based on ZipInfo objects
+                total_size = 0
+                
+                # Examine each file in the zip
+                for info in zip_ref.infolist():
+                    # Skip directories
+                    if info.filename.endswith('/'):
+                        continue
+                    
+                    # Get file size directly from zip info
+                    file_size = info.file_size
+                    
+                    # Get modification time from zip info
+                    year, month, day, hour, minute, second = info.date_time
+                    file_time = datetime(year, month, day, hour, minute, second)
+                    
+                    # Convert to timestamp for comparison (assuming UTC)
+                    # We need to localize to match the reference timestamp timezone
+                    file_time_localized = tz.localize(file_time)
+                    file_timestamp = file_time_localized.timestamp()
+                    
+                    if debug:
+                        print(f"File: {info.filename}, Size: {file_size}, Timestamp: {file_timestamp}")
+                        print(f"File time: {file_time_localized}")
+                    
+                    # Check criteria: file size ≥ min_size and modified on or after reference_timestamp
+                    if file_size >= min_size and file_timestamp >= reference_timestamp:
+                        total_size += file_size
+                        if debug:
+                            print(f"Adding file: {info.filename}, size: {file_size}")
+            
+            return total_size
     
     except Exception as e:
         return f"Error processing files: {str(e)}"
-    
-    finally:
-        # Delete the original zip file
-        if actual_path and os.path.exists(actual_path):
-            os.remove(actual_path)
 
 def move_and_rename_files(file_path):
     """
@@ -776,204 +549,129 @@ def move_and_rename_files(file_path):
     rename files replacing each digit with the next, and run a command to get the hash.
     
     Parameters:
-        file_path (str): Path to the zip file
+        file_path (str): Path to the zip file or URL containing the files
         
     Returns:
         str: The result of running 'grep . * | LC_ALL=C sort | sha256sum' on the folder
     """
-    import zipfile
     import os
     import shutil
-    import glob
     import subprocess
-    
-    # Check multiple possible locations for the zip file
-    possible_paths = [
-        file_path,
-        os.path.join("tmp_uploads", file_path),
-        os.path.join("tmp_uploads", os.path.basename(file_path)),
-        "tmp_uploads/zips",
-    ]
-    
-    # Try to find the zip file in tmp_uploads directory
-    zip_files = glob.glob("tmp_uploads/**/*.zip", recursive=True)
-    if zip_files:
-        possible_paths.extend(zip_files)
-    
-    # Try each potential path
-    actual_path = None
-    for path in possible_paths:
-        if os.path.exists(path):
-            if os.path.isfile(path) and zipfile.is_zipfile(path):
-                actual_path = path
-                break
-            elif os.path.isdir(path):
-                # If it's a directory, look for zip files inside
-                for f in os.listdir(path):
-                    full_path = os.path.join(path, f)
-                    if os.path.isfile(full_path) and zipfile.is_zipfile(full_path):
-                        actual_path = full_path
-                        break
-                if actual_path:
-                    break
-    
-    if not actual_path:
-        return f"Error: Could not find zip file. Checked paths: {possible_paths}"
+    from utils.file_process import managed_file_upload
     
     # Create directories
-    extract_dir = "extracted_files"
     target_dir = "moved_files"
     
     # Clean up existing directories
-    for dir_path in [extract_dir, target_dir]:
-        if os.path.exists(dir_path):
-            shutil.rmtree(dir_path)
-        os.makedirs(dir_path)
+    if os.path.exists(target_dir):
+        shutil.rmtree(target_dir)
+    os.makedirs(target_dir)
     
     try:
-        # Extract the zip file
-        with zipfile.ZipFile(actual_path, 'r') as zip_ref:
-            zip_ref.extractall(extract_dir)
-        
-        # Find all files in subdirectories
-        for root, dirs, files in os.walk(extract_dir):
-            if root != extract_dir:  # Only consider files in subdirectories
-                for file in files:
-                    src_path = os.path.join(root, file)
-                    
-                    # Create new filename with digits replaced
-                    new_name = ""
-                    for char in file:
-                        if char.isdigit():
-                            new_name += str((int(char) + 1) % 10)
-                        else:
-                            new_name += char
-                    
-                    # Handle filename conflicts
-                    dst_path = os.path.join(target_dir, new_name)
-                    counter = 1
-                    while os.path.exists(dst_path):
-                        base, ext = os.path.splitext(new_name)
-                        dst_path = os.path.join(target_dir, f"{base}_{counter}{ext}")
-                        counter += 1
-                    
-                    # Move and rename in one step
-                    shutil.move(src_path, dst_path)
-        
-        # Run the grep command in the target directory
-        current_dir = os.getcwd()
-        os.chdir(target_dir)
-        
-        if not os.listdir('.'):
-            return "Error: No files were moved to the target directory."
-        
-        cmd = "grep . * | LC_ALL=C sort | sha256sum"
-        result = subprocess.check_output(cmd, shell=True, text=True)
-        
-        # Return to the original directory
-        os.chdir(current_dir)
-        
-        return result.strip()
+        # Use managed_file_upload to handle both URLs and local files
+        with managed_file_upload(file_path) as (extract_dir, filenames):
+            # Check if we got an error message instead of a directory
+            if isinstance(extract_dir, str) and extract_dir.startswith("Error"):
+                return extract_dir
+            
+            if not filenames:
+                return "Error: No files extracted or found"
+            
+            # Find all files in subdirectories
+            for root, dirs, files in os.walk(extract_dir):
+                if root != extract_dir:  # Only consider files in subdirectories
+                    for file in files:
+                        src_path = os.path.join(root, file)
+                        
+                        # Create new filename with digits replaced
+                        new_name = ""
+                        for char in file:
+                            if char.isdigit():
+                                new_name += str((int(char) + 1) % 10)
+                            else:
+                                new_name += char
+                        
+                        # Handle filename conflicts
+                        dst_path = os.path.join(target_dir, new_name)
+                        counter = 1
+                        while os.path.exists(dst_path):
+                            base, ext = os.path.splitext(new_name)
+                            dst_path = os.path.join(target_dir, f"{base}_{counter}{ext}")
+                            counter += 1
+                        
+                        # Move and rename in one step
+                        shutil.copy2(src_path, dst_path)
+            
+            # Run the grep command in the target directory
+            current_dir = os.getcwd()
+            os.chdir(target_dir)
+            
+            if not os.listdir('.'):
+                return "Error: No files were moved to the target directory."
+            
+            cmd = "grep . * | LC_ALL=C sort | sha256sum"
+            result = subprocess.check_output(cmd, shell=True, text=True)
+            
+            # Return to the original directory
+            os.chdir(current_dir)
+            
+            return result.strip()
     
     except Exception as e:
         return f"Error processing files: {str(e)}"
     
     finally:
-        # Clean up the extraction directory
-        if os.path.exists(extract_dir):
-            shutil.rmtree(extract_dir)
-        
-        # Also delete the original zip file
-        if actual_path and os.path.exists(actual_path):
-            os.remove(actual_path)
+        # Clean up the target directory
+        if os.path.exists(target_dir):
+            shutil.rmtree(target_dir)
 
 def compare_files(file_path):
     """
     Compare two files (a.txt and b.txt) from a zip file and count the number of differing lines.
     
     Parameters:
-        file_path (str): Path to the zip file containing a.txt and b.txt
+        file_path (str): Path to the zip file or URL containing a.txt and b.txt
         
     Returns:
         int: Number of lines that differ between the two files
     """
-    import zipfile
-    import os
-    import shutil
-    import glob
-    
-    # Check multiple possible locations for the zip file
-    possible_paths = [
-        file_path,
-        os.path.join("tmp_uploads", file_path),
-        os.path.join("tmp_uploads", os.path.basename(file_path)),
-        "tmp_uploads/zips",  # Check the directory where zip files are extracted
-    ]
-    
-    # Try to find the zip file in tmp_uploads directory
-    zip_files = glob.glob("tmp_uploads/**/*.zip", recursive=True)
-    if zip_files:
-        possible_paths.extend(zip_files)
-    
-    # Try each potential path
-    actual_path = None
-    for path in possible_paths:
-        if os.path.exists(path):
-            if os.path.isfile(path) and zipfile.is_zipfile(path):
-                actual_path = path
-                break
-            elif os.path.isdir(path):
-                # If it's a directory, look for zip files inside
-                for f in os.listdir(path):
-                    full_path = os.path.join(path, f)
-                    if os.path.isfile(full_path) and zipfile.is_zipfile(full_path):
-                        actual_path = full_path
-                        break
-                if actual_path:
-                    break
-    
-    if not actual_path:
-        return f"Error: Could not find zip file. Checked paths: {possible_paths}"
-    
-    # Create a temporary directory for extraction
-    extract_dir = "extracted_comparison"
-    os.makedirs(extract_dir, exist_ok=True)
+    from utils.file_process import managed_file_upload
     
     try:
-        # Extract the zip file
-        with zipfile.ZipFile(actual_path, 'r') as zip_ref:
-            zip_ref.extractall(extract_dir)
-        
-        # Paths to the extracted files
-        file_a_path = os.path.join(extract_dir, "a.txt")
-        file_b_path = os.path.join(extract_dir, "b.txt")
-        
-        # Check if both files exist
-        if not (os.path.exists(file_a_path) and os.path.exists(file_b_path)):
-            return "Error: Could not find both a.txt and b.txt in the zip file"
-        
-        # Read and compare the files
-        with open(file_a_path, 'r') as file_a, open(file_b_path, 'r') as file_b:
-            lines_a = file_a.readlines()
-            lines_b = file_b.readlines()
+        # Use managed_file_upload to handle both URLs and local files
+        with managed_file_upload(file_path) as (extract_dir, filenames):
+            # Check if we got an error message instead of a directory
+            if isinstance(extract_dir, str) and extract_dir.startswith("Error"):
+                return extract_dir
             
-            # Check if files have the same number of lines
-            if len(lines_a) != len(lines_b):
-                return f"Files have different line counts: a.txt has {len(lines_a)} lines, b.txt has {len(lines_b)} lines"
+            if not filenames:
+                return "Error: No files extracted or found"
             
-            # Count differing lines
-            diff_count = sum(1 for line_a, line_b in zip(lines_a, lines_b) if line_a != line_b)
-        
-        return diff_count
+            # Paths to the extracted files
+            import os
+            file_a_path = os.path.join(extract_dir, "a.txt")
+            file_b_path = os.path.join(extract_dir, "b.txt")
+            
+            # Check if both files exist
+            if not (os.path.exists(file_a_path) and os.path.exists(file_b_path)):
+                return "Error: Could not find both a.txt and b.txt in the zip file"
+            
+            # Read and compare the files
+            with open(file_a_path, 'r') as file_a, open(file_b_path, 'r') as file_b:
+                lines_a = file_a.readlines()
+                lines_b = file_b.readlines()
+                
+                # Check if files have the same number of lines
+                if len(lines_a) != len(lines_b):
+                    return f"Files have different line counts: a.txt has {len(lines_a)} lines, b.txt has {len(lines_b)} lines"
+                
+                # Count differing lines
+                diff_count = sum(1 for line_a, line_b in zip(lines_a, lines_b) if line_a != line_b)
+            
+            return diff_count
     
     except Exception as e:
         return f"Error processing zip file: {str(e)}"
-    
-    finally:
-        # Clean up extracted files
-        if os.path.exists(extract_dir):
-            shutil.rmtree(extract_dir)
-
 
 def sql_ticket_sales():
     """
@@ -1030,7 +728,7 @@ def compress_an_image(image_path):
     Every pixel in the compressed image should match the original image.
     
     Args:
-        image_path (str): Path to the input image
+        image_path (str): Path or URL to the input image
         
     Returns:
         str: Base64 encoded compressed image or error message
@@ -1038,54 +736,67 @@ def compress_an_image(image_path):
     try:
         from PIL import Image
         import io
-        import os
         import base64
+        from utils.file_process import managed_file_upload
         
-        # Check if image exists
-        if not os.path.exists(image_path):
-            return f"Error: Image not found at {image_path}"
-        
-        # Open the image
-        with Image.open(image_path) as img:
-            original_size = img.size
-            original_mode = img.mode
+        # Use managed_file_upload to handle both URLs and local files
+        with managed_file_upload(image_path) as (extract_dir, filenames):
+            # Check if we got an error message instead of a directory
+            if isinstance(extract_dir, str) and extract_dir.startswith("Error"):
+                return extract_dir
             
-            # Method 1: Try with palette mode (lossless for simple images)
-            palette_img = img.convert("P", palette=Image.ADAPTIVE, colors=8)  # Try fewer colors first
+            if not filenames:
+                return "Error: No files found in the upload"
             
-            # Try different compression levels with PNG format
-            for colors in [8, 16, 32, 64, 128, 256]:
-                palette_img = img.convert("P", palette=Image.ADAPTIVE, colors=colors)
+            # Look for image files in the extracted content
+            image_file = None
+            for filename in filenames:
+                lower_filename = filename.lower()
+                if any(lower_filename.endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']):
+                    image_file = os.path.join(extract_dir, filename)
+                    break
+            
+            if not image_file:
+                return "Error: No image file found in the upload"
+            
+            # Open the image
+            with Image.open(image_file) as img:
+                original_size = img.size
+                original_mode = img.mode
                 
+                # Try various compression strategies while maintaining pixel-perfect quality
+                
+                # Method 1: Try with palette mode (lossless for simple images)
+                for colors in [8, 16, 32, 64, 128, 256]:
+                    palette_img = img.convert("P", palette=Image.ADAPTIVE, colors=colors)
+                    
+                    buffer = io.BytesIO()
+                    palette_img.save(buffer, format="PNG", optimize=True, compress_level=9)
+                    file_size = buffer.tell()
+                    
+                    if file_size <= 1500:
+                        # Success! Return as base64
+                        buffer.seek(0)
+                        base64_image = base64.b64encode(buffer.read()).decode('utf-8')
+                        return base64_image
+                
+                # Method 2: Try WebP with lossless compression
                 buffer = io.BytesIO()
-                palette_img.save(buffer, format="PNG", optimize=True, compress_level=9)
+                img.save(buffer, format="WEBP", lossless=True, quality=1, method=6)
                 file_size = buffer.tell()
                 
                 if file_size <= 1500:
-                    # Success! Return as base64
                     buffer.seek(0)
                     base64_image = base64.b64encode(buffer.read()).decode('utf-8')
                     return base64_image
-            
-            # If PNG with palette didn't work, try more aggressive options while preserving dimensions
-            # Try WebP format with maximum compression
-            buffer = io.BytesIO()
-            img.save(buffer, format="WEBP", quality=1, method=6)
-            file_size = buffer.tell()
-            
-            if file_size <= 1500:
-                buffer.seek(0)
-                base64_image = base64.b64encode(buffer.read()).decode('utf-8')
-                return base64_image
-                
-            # If we get here, we couldn't compress enough without resizing
-            return "Error: Image dimensions do not match the original"
-                
+                    
+                # If we get here, we couldn't compress enough without losing quality
+                return "Error: Image could not be compressed to under 1,500 bytes without losing quality"
+                    
     except ImportError:
         return "Error: Required libraries (PIL) not available"
     except Exception as e:
         return f"Error during compression: {str(e)}"
-
 
 def host_your_portfolio_on_github_pages(email):
     urls = {
@@ -1123,75 +834,72 @@ def use_google_colab(email):
     return answer
 
 
+
 def use_an_image_library_in_google_colab(image_path=None):
     """
     Processes an image to count pixels with brightness above a threshold.
     Simulates fixing common errors in Google Colab image processing code.
     
     Args:
-        image_path (str): Path to the image file to process
+        image_path (str): Path or URL to the image file to process
         
     Returns:
         str: The count of pixels with lightness > 0.683
     """
-    import os
     import numpy as np
     from PIL import Image
     import colorsys
-    import glob
+    from utils.file_process import managed_file_upload
     
     try:
-        # Find the image if path is not specified or doesn't exist directly
-        actual_path = None
-        if image_path:
-            possible_paths = [
-                image_path,
-                os.path.join("tmp_uploads", image_path),
-                os.path.join("tmp_uploads", os.path.basename(image_path))
-            ]
+        # Use managed_file_upload to handle both URLs and local files
+        with managed_file_upload(image_path) as (extract_dir, filenames):
+            # Check if we got an error message instead of a directory
+            if isinstance(extract_dir, str) and extract_dir.startswith("Error"):
+                return extract_dir
             
-            for path in possible_paths:
-                if os.path.exists(path) and os.path.isfile(path):
-                    actual_path = path
+            if not filenames:
+                return "Error: No files found in the uploaded content"
+            
+            # Look for image files in the extracted content
+            image_file = None
+            for filename in filenames:
+                lower_filename = filename.lower()
+                if any(lower_filename.endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']):
+                    image_file = os.path.join(extract_dir, filename)
                     break
-        
-        # If no path specified or found, look for any image in tmp_uploads
-        if not actual_path:
-            image_files = glob.glob("tmp_uploads/**/*.{jpg,jpeg,png,gif}", recursive=True)
-            if image_files:
-                actual_path = image_files[0]
-        
-        if not actual_path:
-            return "Error: No image file found"
             
-        # Open the image file
-        image = Image.open(actual_path)
+            # If no specific image file found, use the first file
+            if not image_file:
+                image_file = os.path.join(extract_dir, filenames[0])
+                
+            # Open the image file
+            image = Image.open(image_file)
+            
+            # Process the image
+            rgb = np.array(image) / 255.0
+            
+            # Handle grayscale images by converting to RGB if needed
+            if len(rgb.shape) == 2:  # Grayscale image
+                rgb_3d = np.zeros((rgb.shape[0], rgb.shape[1], 3))
+                for i in range(3):
+                    rgb_3d[:, :, i] = rgb
+                rgb = rgb_3d
+            
+            # Calculate lightness for each pixel
+            lightness = np.apply_along_axis(
+                lambda x: colorsys.rgb_to_hls(*x)[1], 
+                2, 
+                rgb
+            )
+            
+            # Count pixels with lightness above threshold
+            light_pixels = np.sum(lightness > 0.683)
+            
+            return str(light_pixels)
         
-        # Process the image
-        rgb = np.array(image) / 255.0
-        
-        # Handle grayscale images by converting to RGB if needed
-        if len(rgb.shape) == 2:  # Grayscale image
-            rgb_3d = np.zeros((rgb.shape[0], rgb.shape[1], 3))
-            for i in range(3):
-                rgb_3d[:, :, i] = rgb
-            rgb = rgb_3d
-        
-        # Calculate lightness for each pixel
-        lightness = np.apply_along_axis(
-            lambda x: colorsys.rgb_to_hls(*x)[1], 
-            2, 
-            rgb
-        )
-        
-        # Count pixels with lightness above threshold
-        light_pixels = np.sum(lightness > 0.683)
-        
-        return str(light_pixels)
-    
     except Exception as e:
         return f"Error processing image: {str(e)}"
-
 
 def deploy_a_python_api_to_vercel():
     return ""
@@ -1264,7 +972,7 @@ def write_a_fastapi_server_to_serve_data(csv_path, host: str = "127.0.0.1", port
     Creates and runs a FastAPI application that serves student data from a CSV file.
     
     Args:
-        csv_path (str): Path to the CSV file containing student data
+        csv_path (str): Path or URL to the CSV file containing student data
         host (str): The host address to run the API on
         port (int): The port number to run the API on
         
@@ -1272,15 +980,15 @@ def write_a_fastapi_server_to_serve_data(csv_path, host: str = "127.0.0.1", port
         str: The URL where the API is deployed
     """
     import os
-    import glob
     import threading
+    import time
     import pandas as pd
     import socket
-    import time
     from typing import List, Optional
     from fastapi import FastAPI, Query
     from fastapi.middleware.cors import CORSMiddleware
     import uvicorn
+    from utils.file_process import managed_file_upload
     
     # Check if port is already in use
     def is_port_in_use(port):
@@ -1296,103 +1004,102 @@ def write_a_fastapi_server_to_serve_data(csv_path, host: str = "127.0.0.1", port
     if original_port != port:
         print(f"Using port {port} instead of {original_port}")
     
-    # Check multiple possible locations for the CSV file
-    possible_paths = [
-        csv_path,
-        os.path.join("tmp_uploads", csv_path),
-        os.path.join("tmp_uploads", os.path.basename(csv_path))
-    ]
-    
-    # Try to find CSV files in tmp_uploads directory
-    csv_files = glob.glob("tmp_uploads/**/*.csv", recursive=True)
-    if csv_files:
-        possible_paths.extend(csv_files)
-    
-    # Try each potential path
-    actual_path = None
-    for path in possible_paths:
-        if os.path.exists(path) and os.path.isfile(path):
-            # Verify it's a CSV file
+    try:
+        # Use managed_file_upload to handle both URLs and local files
+        with managed_file_upload(csv_path) as (extract_dir, filenames):
+            # Check if we got an error message instead of a directory
+            if isinstance(extract_dir, str) and extract_dir.startswith("Error"):
+                return extract_dir
+                
+            if not filenames:
+                return "Error: No files found in the uploaded content"
+            
+            # Use the first CSV file or any file available
+            csv_file = None
+            for filename in filenames:
+                if filename.endswith('.csv'):
+                    csv_file = os.path.join(extract_dir, filename)
+                    break
+            
+            # If no specific .csv file found, use the first file
+            if not csv_file:
+                csv_file = os.path.join(extract_dir, filenames[0])
+            
+            # Verify file is a valid CSV
             try:
-                pd.read_csv(path)
-                actual_path = path
-                break
-            except:
-                continue
-    
-    if not actual_path:
-        return f"Error: Could not find valid CSV file. Checked paths: {possible_paths}"
-    
-    # Create the FastAPI application
-    app = FastAPI(title="Student Data API")
-    
-    # Enable CORS for all origins
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["*"],
-        expose_headers=["*"]
-    )
-    
-    # Add root endpoint for API documentation
-    @app.get("/")
-    def read_root():
-        return {"message": "Welcome to Student Data API", "endpoints": ["/api"]}
-    
-    @app.get("/api")
-    def get_students(class_: List[str] = Query(None, alias="class")):
-        """
-        Fetch student data from the CSV. If 'class' query parameters are provided,
-        filter students by those classes.
-        """
-        try:
-            # Read the data - using the validated path
-            students_df = pd.read_csv(actual_path)
+                students_df = pd.read_csv(csv_file)
+            except Exception as e:
+                return f"Error: File is not a valid CSV: {str(e)}"
+                
+            # Create the FastAPI application
+            app = FastAPI(title="Student Data API")
             
-            # Apply class filter if provided
-            if class_:
-                filtered_df = students_df[students_df["class"].isin(class_)]
-            else:
-                filtered_df = students_df
-            
-            # Convert to dictionary list
-            students = filtered_df.to_dict(orient="records")
-            return {"students": students}
-        except Exception as e:
-            return {"error": str(e)}
-    
-    # Construct the URL where the API will be available
-    api_url = f"http://localhost:{port}/api"
-    
-    # Print a message with the URL and example usage
-    print(f"Starting student API server at: {api_url}")
-    print(f"Example usage: {api_url}?class=1A&class=1B")
-    print(f"Using CSV file at: {actual_path}")
-    
-    # Start the server in a separate thread
-    def run_server():
-        try:
-            uvicorn_config = uvicorn.Config(
-                app=app,
-                host=host,
-                port=port,
-                log_level="info"
+            # Enable CORS for all origins
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origins=["*"],
+                allow_credentials=True,
+                allow_methods=["GET", "POST", "OPTIONS"],
+                allow_headers=["*"],
+                expose_headers=["*"]
             )
-            server = uvicorn.Server(uvicorn_config)
-            server.run()
-        except Exception as e:
-            print(f"Server error: {e}")
+            
+            # Add root endpoint for API documentation
+            @app.get("/")
+            def read_root():
+                return {"message": "Welcome to Student Data API", "endpoints": ["/api"]}
+            
+            @app.get("/api")
+            def get_students(class_: List[str] = Query(None, alias="class")):
+                """
+                Fetch student data from the CSV. If 'class' query parameters are provided,
+                filter students by those classes.
+                """
+                # Since we already read the CSV in setup, use the DataFrame
+                # Apply class filter if provided
+                if class_:
+                    filtered_df = students_df[students_df["class"].isin(class_)]
+                else:
+                    filtered_df = students_df
+                
+                # Convert to dictionary list
+                students = filtered_df.to_dict(orient="records")
+                return {"students": students}
+            
+            # Construct the URL where the API will be available
+            api_url = f"http://localhost:{port}/api"
+            
+            # Print a message with the URL and example usage
+            print(f"Starting student API server at: {api_url}")
+            print(f"Example usage: {api_url}?class=1A&class=1B")
+            print(f"Using CSV file at: {csv_file}")
+            
+            # Start the server in a separate thread
+            def run_server():
+                try:
+                    uvicorn_config = uvicorn.Config(
+                        app=app,
+                        host=host,
+                        port=port,
+                        log_level="info"
+                    )
+                    server = uvicorn.Server(uvicorn_config)
+                    server.run()
+                except Exception as e:
+                    print(f"Server error: {e}")
+            
+            server_thread = threading.Thread(target=run_server, daemon=True)
+            server_thread.start()
+            
+            # Give the server a moment to start
+            time.sleep(2)
+            
+            # Return the API URL
+            return api_url
     
-    server_thread = threading.Thread(target=run_server, daemon=True)
-    server_thread.start()
-    
-    # Give the server a moment to start
-    time.sleep(2)
-    
-    # Return the API URL
-    return api_url
+    except Exception as e:
+        return f"Error: {str(e)}"
+
 
 def run_a_local_llm_with_llamafile():
     return ""
@@ -2388,7 +2095,7 @@ def extract_tables_from_pdf(pdf_path, filter_subject, min_score, sum_subject, st
     Calculate total marks for one subject for students meeting score criteria in another subject within specified groups.
     
     Parameters:
-    pdf_path (str): Path to the PDF file containing student marks
+    pdf_path (str): Path or URL to the PDF file containing student marks
     filter_subject (str): Subject name to filter by (e.g., 'English', 'Economics')
     min_score (int): Minimum score threshold for the filter subject
     sum_subject (str): Subject name to sum marks for (e.g., 'Maths', 'Biology')
@@ -2399,168 +2106,165 @@ def extract_tables_from_pdf(pdf_path, filter_subject, min_score, sum_subject, st
     int: Total marks in sum_subject for students meeting filter criteria
     """
     import os
-    import glob
-    import PyPDF2
     import pandas as pd
-    
-    # Check multiple possible locations for the PDF file
-    possible_paths = [
-        pdf_path,
-        os.path.join("tmp_uploads", pdf_path),
-        os.path.join("tmp_uploads", os.path.basename(pdf_path))
-    ]
-    
-    # Try to find PDF files in tmp_uploads directory
-    pdf_files = glob.glob("tmp_uploads/**/*.pdf", recursive=True)
-    if pdf_files:
-        possible_paths.extend(pdf_files)
-    
-    # Try each potential path
-    actual_path = None
-    for path in possible_paths:
-        if os.path.exists(path) and os.path.isfile(path):
-            try:
-                # Verify it's a valid PDF file
-                with open(path, 'rb') as f:
-                    header = f.read(5)
-                    if header.startswith(b'%PDF-'):
-                        actual_path = path
-                        break
-            except Exception:
-                # Not a valid PDF, try next path
-                continue
-    
-    if not actual_path:
-        return f"Error: Could not find valid PDF file. Checked paths: {possible_paths}"
-    
-    # Initialize variables
-    all_data = []
-    current_group = None
+    import PyPDF2
+    from utils.file_process import managed_file_upload
     
     try:
-        # Read PDF
-        with open(actual_path, 'rb') as file:
-            pdf_reader = PyPDF2.PdfReader(file)
-            num_pages = len(pdf_reader.pages)
+        # Use managed_file_upload to handle both URLs and local files
+        with managed_file_upload(pdf_path) as (extract_dir, filenames):
+            # Check if we got an error message instead of a directory
+            if isinstance(extract_dir, str) and extract_dir.startswith("Error"):
+                return extract_dir
             
-            # Process each page
-            for page_num in range(num_pages):
-                page = pdf_reader.pages[page_num]
-                text = page.extract_text()
+            if not filenames:
+                return "Error: No files found in the upload"
+            
+            # Look for PDF files in the extracted content
+            pdf_file = None
+            for filename in filenames:
+                if filename.lower().endswith('.pdf'):
+                    pdf_file = os.path.join(extract_dir, filename)
+                    break
+            
+            # If no specific PDF file found, use the first file and check if it's PDF
+            if not pdf_file:
+                first_file = os.path.join(extract_dir, filenames[0])
+                try:
+                    # Check if it's a PDF by reading the header
+                    with open(first_file, 'rb') as f:
+                        header = f.read(4)
+                        if header == b'%PDF':
+                            pdf_file = first_file
+                except:
+                    pass
                 
-                # Extract group number from header
-                if "Student marks - Group" in text:
-                    group_num = int(text.split("Student marks - Group")[1].split()[0])
-                    current_group = group_num
+            if not pdf_file:
+                return "Error: No PDF file found in the upload"
+            
+            # Initialize variables
+            all_data = []
+            current_group = None
+            
+            # Read PDF
+            with open(pdf_file, 'rb') as file:
+                pdf_reader = PyPDF2.PdfReader(file)
+                num_pages = len(pdf_reader.pages)
+                
+                # Process each page
+                for page_num in range(num_pages):
+                    page = pdf_reader.pages[page_num]
+                    text = page.extract_text()
                     
-                    # Only process groups within specified range
-                    if start_group <= current_group <= end_group:
-                        # Split text into lines
-                        lines = text.split('\n')
+                    # Extract group number from header
+                    if "Student marks - Group" in text:
+                        group_num = int(text.split("Student marks - Group")[1].split()[0])
+                        current_group = group_num
                         
-                        # Find start of table data (after headers)
-                        data_start = False
-                        table_data = []
-                        headers = ['Maths', 'Physics', 'English', 'Economics', 'Biology']
-                        
-                        for line in lines:
-                            if all(header in line for header in headers):
-                                data_start = True
-                                continue
-                            if data_start:
-                                # Check if line contains numeric data
-                                values = line.strip().split()
-                                if len(values) == 5 and all(v.isdigit() for v in values):
-                                    table_data.append(values)
-                        
-                        # Create DataFrame for current group
-                        if table_data:
-                            df = pd.DataFrame(table_data, columns=headers)
-                            # Convert to numeric
-                            df = df.astype(int)
-                            # Add group column
-                            df['Group'] = current_group
-                            all_data.append(df)
-        
-        # Combine all relevant group data
-        if not all_data:
-            return 0
-        
-        combined_df = pd.concat(all_data, ignore_index=True)
-        
-        # Check if required columns exist
-        if filter_subject not in combined_df.columns:
-            return f"Error: Filter subject '{filter_subject}' not found in data"
-        if sum_subject not in combined_df.columns:
-            return f"Error: Sum subject '{sum_subject}' not found in data"
-        
-        # Filter students based on filter subject score
-        filtered_df = combined_df[combined_df[filter_subject] >= min_score]
-        
-        # Calculate total marks for sum subject
-        total_marks = filtered_df[sum_subject].sum()
-        
-        # Convert numpy.int64 to regular Python int to avoid JSON serialization issues
-        return int(total_marks)
+                        # Only process groups within specified range
+                        if start_group <= current_group <= end_group:
+                            # Split text into lines
+                            lines = text.split('\n')
+                            
+                            # Find start of table data (after headers)
+                            data_start = False
+                            table_data = []
+                            headers = ['Maths', 'Physics', 'English', 'Economics', 'Biology']
+                            
+                            for line in lines:
+                                if all(header in line for header in headers):
+                                    data_start = True
+                                    continue
+                                if data_start:
+                                    # Check if line contains numeric data
+                                    values = line.strip().split()
+                                    if len(values) == 5 and all(v.isdigit() for v in values):
+                                        table_data.append(values)
+                            
+                            # Create DataFrame for current group
+                            if table_data:
+                                df = pd.DataFrame(table_data, columns=headers)
+                                # Convert to numeric
+                                df = df.astype(int)
+                                # Add group column
+                                df['Group'] = current_group
+                                all_data.append(df)
+            
+            # Combine all relevant group data
+            if not all_data:
+                return 0
+            
+            combined_df = pd.concat(all_data, ignore_index=True)
+            
+            # Check if required columns exist
+            if filter_subject not in combined_df.columns:
+                return f"Error: Filter subject '{filter_subject}' not found in data"
+            if sum_subject not in combined_df.columns:
+                return f"Error: Sum subject '{sum_subject}' not found in data"
+            
+            # Filter students based on filter subject score
+            filtered_df = combined_df[combined_df[filter_subject] >= min_score]
+            
+            # Calculate total marks for sum subject
+            total_marks = filtered_df[sum_subject].sum()
+            
+            # Convert numpy.int64 to regular Python int to avoid JSON serialization issues
+            return int(total_marks)
     
     except Exception as e:
         return f"Error processing PDF file: {str(e)}"
-
 
 def convert_a_pdf_to_markdown(file_path=None):
     """
     Converts a PDF file to Markdown and formats it using Prettier.
     
     Args:
-        file_path (str): Path to the PDF file to convert. If None, will search for PDFs in common locations.
+        file_path (str): Path or URL to the PDF file to convert.
         
     Returns:
         str: The formatted Markdown content from the PDF
     """
     import os
-    import glob
-    import subprocess
     import tempfile
+    import subprocess
+    from utils.file_process import managed_file_upload
     
     try:
-        # Check multiple possible locations for the file
-        possible_paths = []
-        
-        if file_path:
-            possible_paths.extend([
-                file_path,
-                os.path.join("tmp_uploads", file_path),
-                os.path.join("tmp_uploads", os.path.basename(file_path))
-            ])
-        
-        # Try to find PDF files in tmp_uploads directory
-        pdf_files = glob.glob("tmp_uploads/**/*.pdf", recursive=True)
-        if pdf_files:
-            possible_paths.extend(pdf_files)
-        
-        # Try each potential path
-        actual_path = None
-        for path in possible_paths:
-            if os.path.exists(path) and os.path.isfile(path):
+        # Use managed_file_upload to handle both URLs and local files
+        with managed_file_upload(file_path) as (extract_dir, filenames):
+            # Check if we got an error message instead of a directory
+            if isinstance(extract_dir, str) and extract_dir.startswith("Error"):
+                return extract_dir
+            
+            if not filenames:
+                return "Error: No files found in the upload"
+            
+            # Look for PDF files in the extracted content
+            pdf_file = None
+            for filename in filenames:
+                if filename.lower().endswith('.pdf'):
+                    pdf_file = os.path.join(extract_dir, filename)
+                    break
+            
+            # If no specific PDF file found, use the first file and check if it's PDF
+            if not pdf_file:
+                first_file = os.path.join(extract_dir, filenames[0])
                 try:
-                    # Verify it's a valid PDF file
-                    with open(path, 'rb') as f:
-                        header = f.read(5)
-                        if header.startswith(b'%PDF-'):
-                            actual_path = path
-                            break
-                except Exception:
-                    # Not a valid PDF, try next path
-                    continue
-        
-        if not actual_path:
-            return f"Error: Could not find valid PDF file. Checked paths: {possible_paths}"
-        
-        # Extract text from PDF using PyPDF2
-        try:
+                    # Check if it's a PDF by reading the header
+                    with open(first_file, 'rb') as f:
+                        header = f.read(4)
+                        if header == b'%PDF':
+                            pdf_file = first_file
+                except:
+                    pass
+                
+            if not pdf_file:
+                return "Error: No PDF file found in the upload"
+            
+            # Extract text from PDF using PyPDF2
             import PyPDF2
             text = ""
-            with open(actual_path, 'rb') as file:
+            with open(pdf_file, 'rb') as file:
                 try:
                     # Try newer PyPDF2 API
                     reader = PyPDF2.PdfReader(file)
@@ -2571,42 +2275,52 @@ def convert_a_pdf_to_markdown(file_path=None):
                     reader = PyPDF2.PdfFileReader(file)
                     for i in range(reader.numPages):
                         text += reader.getPage(i).extractText() + "\n\n"
-        except ImportError:
-            return "Error: PyPDF2 library is required for PDF processing."
-        
-        # Create a temporary markdown file for prettier formatting
-        with tempfile.NamedTemporaryFile(suffix='.md', mode='w', delete=False) as md_file:
-            md_path = md_file.name
-            md_file.write(text)
-        
-        # Format with prettier 3.4.2
-        try:
-            subprocess.run(
-                ['npx', 'prettier@3.4.2', '--write', md_path],
-                check=True,
-                capture_output=True
-            )
             
-            # Read the formatted markdown
-            with open(md_path, 'r') as f:
-                formatted_markdown = f.read()
-                
-            return formatted_markdown
+            # Create a temporary markdown file for prettier formatting
+            with tempfile.NamedTemporaryFile(suffix='.md', mode='w', delete=False) as md_file:
+                md_path = md_file.name
+                md_file.write(text)
             
-        finally:
-            # Clean up temporary file
-            if os.path.exists(md_path):
+            # Check if we're on Vercel
+            is_vercel = os.environ.get('VERCEL') == '1' or os.environ.get('VERCEL_ENV') is not None
+            
+            if is_vercel:
+                # On Vercel, just return the unformatted text
                 os.unlink(md_path)
-                
+                return text
+            else:
+                # Format with prettier 3.4.2 (local environment only)
+                try:
+                    subprocess.run(
+                        ['npx', 'prettier@3.4.2', '--write', md_path],
+                        check=True,
+                        capture_output=True
+                    )
+                    
+                    # Read the formatted markdown
+                    with open(md_path, 'r') as f:
+                        formatted_markdown = f.read()
+                    
+                    return formatted_markdown
+                    
+                finally:
+                    # Clean up temporary file
+                    if os.path.exists(md_path):
+                        os.unlink(md_path)
+                    
+    except ImportError as e:
+        return f"Error: Required library not available - {str(e)}"
     except Exception as e:
         return f"Error converting PDF to Markdown: {str(e)}"
+
+
 
 def clean_up_excel_sales_data(file_path=None, cutoff_date="2022-11-24T11:42:27+05:30", product_name="Kappa", country_code="BR"):
     """
     Clean Excel sales data and calculate the total margin for transactions meeting specified criteria.
     
     Args:
-        file_path (str): Path to the Excel file containing sales data
+        file_path (str): Path or URL to the Excel file containing sales data
         cutoff_date (str): ISO 8601 date string to filter transactions (inclusive)
         product_name (str): Product name to filter by (before the slash)
         country_code (str): Country code to filter by after standardization
@@ -2615,245 +2329,204 @@ def clean_up_excel_sales_data(file_path=None, cutoff_date="2022-11-24T11:42:27+0
         float: Total margin for the filtered transactions as a ratio (Total Sales - Total Cost) / Total Sales
     """
     import pandas as pd
-    from datetime import datetime
-    import re
-    from utils.file_process import TMP_DIR
-    import glob
-    import os
+    from utils.file_process import managed_file_upload
     
     try:
-        # Read the Excel file: either from file_path or by searching known directories.
-        if file_path and os.path.exists(file_path):
-            df = pd.read_excel(file_path)
-        else:
-            excel_files = list(TMP_DIR.glob("**/*.xlsx")) + list(TMP_DIR.glob("**/*.xls"))
-            if not excel_files:
-                uploads_path = os.path.join(os.getcwd(), "tmp_uploads")
-                if os.path.exists(uploads_path):
-                    excel_files = glob.glob(os.path.join(uploads_path, "**/*.xlsx"), recursive=True)
-                    excel_files.extend(glob.glob(os.path.join(uploads_path, "**/*.xls"), recursive=True))
-            if not excel_files:
-                return "Error: No Excel files found in any upload directories"
-            excel_path = str(excel_files[0])
+        # Use managed_file_upload to handle both URLs and local files
+        with managed_file_upload(file_path) as (extract_dir, filenames):
+            # Check if we got an error message instead of a directory
+            if isinstance(extract_dir, str) and extract_dir.startswith("Error"):
+                return extract_dir
+            
+            if not filenames:
+                return "Error: No files found in the upload"
+            
+            # Look for Excel files in the extracted content
+            import os
+            excel_path = None
+            for fname in filenames:
+                if fname.lower().endswith(('.xlsx', '.xls')):
+                    excel_path = os.path.join(extract_dir, fname)
+                    break
+            
+            if not excel_path:
+                return "Error: No Excel files found in the uploaded content"
+            
+            # Read the Excel file
             df = pd.read_excel(excel_path)
-        
-        # 1. Trim and normalize strings
-        if 'Customer Name' in df.columns:
-            df['Customer Name'] = df['Customer Name'].astype(str).str.strip()
-        
-        # Standardize country names
-        country_map = {
-            'USA': 'US', 'U.S.A': 'US', 'U.S.A.': 'US', 'United States': 'US',
-            'Brasil': 'BR', 'Brazil': 'BR', 'BRA': 'BR', 'BRAZIL': 'BR',
-            'UK': 'GB', 'U.K.': 'GB', 'United Kingdom': 'GB',
-            'CHN': 'CN', 'China': 'CN',
-            'IND': 'IN', 'India': 'IN'
-        }
-        
-        if 'Country' in df.columns:
-            df['Country'] = df['Country'].astype(str).str.strip()
-            df['Country'] = df['Country'].replace(country_map)
-        
-        # 2. Standardize date formats
-        date_column = None
-        for col in df.columns:
-            if any(keyword in col.lower() for keyword in ['date', 'time']):
-                date_column = col
-                break
-        
-        if date_column:
-            # Handle the case where the date column is numeric (Excel serial date)
-            if pd.api.types.is_numeric_dtype(df[date_column]):
-                df[date_column] = pd.to_datetime('1899-12-30') + pd.to_timedelta(df[date_column], unit='d')
-            else:
-                # Function to try various date formats
-                def parse_dates(date_str):
-                    if pd.isna(date_str):
-                        return pd.NaT
-                    
-                    date_str = str(date_str).strip()
-                    formats = [
-                        '%m-%d-%Y', '%Y/%m/%d', '%d/%m/%Y', '%Y-%m-%d',
-                        '%m/%d/%Y %H:%M:%S', '%Y-%m-%d %H:%M:%S'
-                    ]
-                    
-                    for fmt in formats:
+            
+            # 1. Trim and normalize strings
+            if 'Customer Name' in df.columns:
+                df['Customer Name'] = df['Customer Name'].astype(str).str.strip()
+            
+            # Standardize country names
+            country_map = {
+                'USA': 'US', 'U.S.A': 'US', 'U.S.A.': 'US', 'United States': 'US',
+                'Brasil': 'BR', 'Brazil': 'BR', 'BRA': 'BR', 'BRAZIL': 'BR',
+                'UK': 'GB', 'U.K.': 'GB', 'United Kingdom': 'GB',
+                'CHN': 'CN', 'China': 'CN',
+                'IND': 'IN', 'India': 'IN'
+            }
+            
+            if 'Country' in df.columns:
+                df['Country'] = df['Country'].astype(str).str.strip()
+                df['Country'] = df['Country'].replace(country_map)
+            
+            # 2. Standardize date formats
+            date_column = None
+            for col in df.columns:
+                if any(keyword in col.lower() for keyword in ['date', 'time']):
+                    date_column = col
+                    break
+            
+            if date_column:
+                # Handle the case where the date column is numeric (Excel serial date)
+                if pd.api.types.is_numeric_dtype(df[date_column]):
+                    df[date_column] = pd.to_datetime('1899-12-30') + pd.to_timedelta(df[date_column], unit='d')
+                else:
+                    # Function to try various date formats
+                    def parse_dates(date_str):
+                        if pd.isna(date_str):
+                            return pd.NaT
+                        
+                        date_str = str(date_str).strip()
+                        formats = [
+                            '%m-%d-%Y', '%Y/%m/%d', '%d/%m/%Y', '%Y-%m-%d',
+                            '%m/%d/%Y %H:%M:%S', '%Y-%m-%d %H:%M:%S'
+                        ]
+                        
+                        for fmt in formats:
+                            try:
+                                return pd.to_datetime(date_str, format=fmt)
+                            except:
+                                pass
+                        
                         try:
-                            return pd.to_datetime(date_str, format=fmt)
+                            return pd.to_datetime(date_str)
                         except:
-                            pass
+                            return pd.NaT
                     
-                    try:
-                        return pd.to_datetime(date_str)
-                    except:
-                        return pd.NaT
+                    df[date_column] = df[date_column].apply(parse_dates)
+            
+            # 3. Extract product name (before the slash)
+            product_field = None
+            for col in df.columns:
+                if 'product' in col.lower():
+                    product_field = col
+                    break
+            
+            if product_field:
+                df['Product_Name'] = df[product_field].astype(str).apply(lambda x: x.split('/')[0].strip())
+            
+            # 4. Clean sales and cost values
+            for col in ['Sales', 'Cost']:
+                if col in df.columns:
+                    # Remove 'USD' and spaces, then convert to numeric
+                    df[col] = df[col].astype(str).str.replace('USD', '').str.strip()
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # Handle missing cost values (set to 50% of sales)
+            if 'Cost' in df.columns and 'Sales' in df.columns:
+                df.loc[df['Cost'].isna(), 'Cost'] = df['Sales'] * 0.5
+            
+            # 5. Filter the data
+            # Convert cutoff date string to datetime
+            cutoff_dt = pd.to_datetime(cutoff_date)
+            
+            filtered_df = df.copy()
+            
+            # Filter by date - handle both naive and timezone-aware dates
+            if date_column:
+                # Make sure cutoff_dt is timezone-naive for consistent comparison
+                if hasattr(cutoff_dt, 'tz') and cutoff_dt.tz is not None:
+                    cutoff_dt = cutoff_dt.tz_localize(None)
                 
-                df[date_column] = df[date_column].apply(parse_dates)
-        
-        # 3. Extract product name (before the slash)
-        product_field = None
-        for col in df.columns:
-            if 'product' in col.lower():
-                product_field = col
-                break
-        
-        if product_field:
-            df['Product_Name'] = df[product_field].astype(str).apply(lambda x: x.split('/')[0].strip())
-        
-        # 4. Clean sales and cost values
-        for col in ['Sales', 'Cost']:
-            if col in df.columns:
-                # Remove 'USD' and spaces, then convert to numeric
-                df[col] = df[col].astype(str).str.replace('USD', '').str.strip()
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        # Handle missing cost values (set to 50% of sales)
-        if 'Cost' in df.columns and 'Sales' in df.columns:
-            df.loc[df['Cost'].isna(), 'Cost'] = df['Sales'] * 0.5
-        
-        # 5. Filter the data
-        # Convert cutoff date string to datetime
-        cutoff_dt = pd.to_datetime(cutoff_date)
-        
-        filtered_df = df.copy()
-        
-        # Filter by date - handle both naive and timezone-aware dates
-        if date_column:
-            # Make sure cutoff_dt is timezone-naive for consistent comparison
-            if hasattr(cutoff_dt, 'tz') and cutoff_dt.tz is not None:
-                cutoff_dt = cutoff_dt.tz_localize(None)
+                # Make dataframe dates timezone-naive too
+                if filtered_df[date_column].dtype == 'datetime64[ns]' and hasattr(filtered_df[date_column].iloc[0], 'tz'):
+                    if filtered_df[date_column].iloc[0].tz is not None:
+                        filtered_df[date_column] = filtered_df[date_column].dt.tz_localize(None)
+                
+                # Filter dates up to and including the cutoff date
+                filtered_df = filtered_df[~filtered_df[date_column].isna()]
+                filtered_df = filtered_df[filtered_df[date_column] <= cutoff_dt]
             
-            # Make dataframe dates timezone-naive too
-            if hasattr(df[date_column].iloc[0], 'tz') and df[date_column].iloc[0].tz is not None:
-                filtered_df[date_column] = filtered_df[date_column].dt.tz_localize(None)
+            # Filter by product name
+            if 'Product_Name' in filtered_df.columns:
+                filtered_df = filtered_df[filtered_df['Product_Name'] == product_name]
+            elif product_field:
+                # If we didn't create Product_Name column but have a product field
+                filtered_df = filtered_df[filtered_df[product_field].astype(str).str.startswith(product_name + '/')]
             
-            # Filter dates up to and including the cutoff date
-            filtered_df = filtered_df[~filtered_df[date_column].isna()]
-            filtered_df = filtered_df[filtered_df[date_column] <= cutoff_dt]
-        
-        # Filter by product name
-        if 'Product_Name' in filtered_df.columns:
-            filtered_df = filtered_df[filtered_df['Product_Name'] == product_name]
-        elif product_field:
-            # If we didn't create Product_Name column but have a product field
-            filtered_df = filtered_df[filtered_df[product_field].astype(str).str.startswith(product_name + '/')]
-        
-        # Filter by country
-        if 'Country' in filtered_df.columns:
-            filtered_df = filtered_df[filtered_df['Country'] == country_code]
-        
-        # 6. Calculate the margin
-        if 'Sales' in filtered_df.columns and 'Cost' in filtered_df.columns:
-            total_sales = filtered_df['Sales'].sum()
-            total_cost = filtered_df['Cost'].sum()
+            # Filter by country
+            if 'Country' in filtered_df.columns:
+                filtered_df = filtered_df[filtered_df['Country'] == country_code]
             
-            # Calculate margin as a ratio: (Sales - Cost) / Sales
-            if total_sales > 0:
-                total_margin = (total_sales - total_cost) / total_sales
+            # 6. Calculate the margin
+            if 'Sales' in filtered_df.columns and 'Cost' in filtered_df.columns:
+                total_sales = filtered_df['Sales'].sum()
+                total_cost = filtered_df['Cost'].sum()
+                
+                # Calculate margin as a ratio: (Sales - Cost) / Sales
+                if total_sales > 0:
+                    total_margin = (total_sales - total_cost) / total_sales
+                else:
+                    total_margin = 0.0
+                
+                return round(total_margin, 6)  # Return with 6 decimal precision
             else:
-                total_margin = 0.0
-            
-            return round(total_margin, 6)  # Return with 6 decimal precision
-        else:
-            return "Error: Required columns 'Sales' or 'Cost' not found in the Excel file."
+                return "Error: Required columns 'Sales' or 'Cost' not found in the Excel file."
         
     except Exception as e:
         return f"Error processing Excel file: {str(e)}"
-
-def parse_log_line(line):
-    # Regex for parsing log lines
-    log_pattern = (r'^(\S+) (\S+) (\S+) \[(.*?)\] "(\S+) (.*?) (\S+)" (\d+) (\S+) "(.*?)" "(.*?)" (\S+) (\S+)$')
-    match = re.match(log_pattern, line)
-    if match:
-        return {
-            "ip": match.group(1),
-            "time": match.group(4),  # e.g. 01/May/2024:00:00:00 -0500
-            "method": match.group(5),
-            "url": match.group(6),
-            "protocol": match.group(7),
-            "status": int(match.group(8)),
-            "size": int(match.group(9)) if match.group(9).isdigit() else 0,
-            "referer": match.group(10),
-            "user_agent": match.group(11),
-            "vhost": match.group(12),
-            "server": match.group(13)
-        }
-    return None
-
-def load_logs(file_path):
-    if not os.path.exists(file_path):
-        print(f"Error: File '{file_path}' not found.")
-        return pd.DataFrame()
-    
-    parsed_logs = []
-    # Open with errors='ignore' for problematic lines
-    with gzip.open(file_path, 'rt', encoding='utf-8', errors='ignore') as f:
-        for line in f:
-            parsed_entry = parse_log_line(line)
-            if parsed_entry:
-                parsed_logs.append(parsed_entry)
-    return pd.DataFrame(parsed_logs)
-
-def convert_time(timestamp):
-    return datetime.strptime(timestamp, "%d/%b/%Y:%H:%M:%S %z")
 
 def clean_up_student_marks(file_path):
     """
     Counts the number of unique student IDs in a text file.
     
     Args:
-        file_path (str): Path to the text file containing student IDs
+        file_path (str): Path to the text file containing student IDs or URL to download
         
     Returns:
         int: The number of unique student IDs found in the file
     """
-    import os
-    import glob
     import re
+    from utils.file_process import managed_file_upload
     
-    # Check multiple possible locations for the file
-    possible_paths = [
-        file_path,
-        os.path.join("tmp_uploads", file_path),
-        os.path.join("tmp_uploads", os.path.basename(file_path))
-    ]
-    
-    # Try to find text files in tmp_uploads directory
-    text_files = glob.glob("tmp_uploads/**/*.txt", recursive=True)
-    if text_files:
-        possible_paths.extend(text_files)
-    
-    # Try each potential path
-    actual_path = None
-    for path in possible_paths:
-        if os.path.exists(path) and os.path.isfile(path):
-            try:
-                # Verify it's a text file by reading the first few lines
-                with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                    # Just read a small sample to verify it's text
-                    f.read(100)
-                    actual_path = path
-                    break
-            except Exception:
-                # Not a valid text file, try next path
-                continue
-    
-    if not actual_path:
-        return f"Error: Could not find valid text file. Checked paths: {possible_paths}"
-    
-    # Data Extraction: Read file line by line and extract student IDs
-    student_ids = set()
     try:
-        with open(actual_path, 'r', encoding='utf-8', errors='ignore') as file:
-            for line in file:
-                # Match exact 10-character alphanumeric IDs
-                matches = re.findall(r'\b[A-Z0-9]{10}\b', line)
-                student_ids.update(matches)
-                
-        # Return the count of unique student IDs
-        return len(student_ids)
+        # Use managed_file_upload to handle both URLs and local files
+        with managed_file_upload(file_path) as (extract_dir, filenames):
+            # Check if we got an error message instead of a directory
+            if isinstance(extract_dir, str) and extract_dir.startswith("Error"):
+                return extract_dir
+            
+            if not filenames:
+                return "Error: No files found in the uploaded content"
+            
+            # Use the first text file or any file available
+            text_file = None
+            for filename in filenames:
+                if filename.endswith('.txt'):
+                    text_file = os.path.join(extract_dir, filename)
+                    break
+            
+            # If no specific .txt file found, use the first file
+            if not text_file:
+                text_file = os.path.join(extract_dir, filenames[0])
+            
+            # Data Extraction: Read file line by line and extract student IDs
+            student_ids = set()
+            with open(text_file, 'r', encoding='utf-8', errors='ignore') as file:
+                for line in file:
+                    # Match exact 10-character alphanumeric IDs
+                    matches = re.findall(r'\b[A-Z0-9]{10}\b', line)
+                    student_ids.update(matches)
+            
+            # Return the count of unique student IDs
+            return len(student_ids)
+    
     except Exception as e:
         return f"Error processing file: {e}"
+
 
 def apache_log_requests(file_path, topic_heading, start_time, end_time, day):
     """
@@ -3242,7 +2915,7 @@ def extract_nested_json_keys(file_path=None, target_key="TQG"):
     Count the number of times a specific key appears in a nested JSON structure.
     
     Args:
-        file_path (str): Path to the JSON file to analyze
+        file_path (str): Path or URL to the JSON file to analyze
         target_key (str): The key to count occurrences of (default: "TQG")
         
     Returns:
@@ -3250,79 +2923,67 @@ def extract_nested_json_keys(file_path=None, target_key="TQG"):
     """
     import os
     import json
-    from utils.file_process import managed_file_upload, process_uploaded_file, TMP_DIR
+    from utils.file_process import managed_file_upload
     
     try:
-        json_file = None
-        
-        # Process the file if provided
-        if file_path:
-            # Use managed_file_upload for better cleanup
-            with managed_file_upload(file_path) as (dir_path, filenames):
-                if not filenames:
-                    return "Error: No files found in the uploaded content"
+        # Use managed_file_upload to handle both URLs and local files
+        with managed_file_upload(file_path) as (extract_dir, filenames):
+            # Check if we got an error message instead of a directory
+            if isinstance(extract_dir, str) and extract_dir.startswith("Error"):
+                return extract_dir
+            
+            if not filenames:
+                return "Error: No files found in the uploaded content"
+            
+            # Use the first JSON file or any available file
+            json_file = None
+            for filename in filenames:
+                if filename.lower().endswith('.json'):
+                    json_file = os.path.join(extract_dir, filename)
+                    break
+            
+            # If no specific .json file found, use the first file
+            if not json_file:
+                json_file = os.path.join(extract_dir, filenames[0])
+            
+            # Verify file exists before proceeding
+            if not os.path.exists(json_file):
+                return f"Error: JSON file not found at path: {json_file}"
                 
-                # Use the first file that has a JSON extension
-                for filename in filenames:
-                    if filename.lower().endswith('.json'):
-                        json_file = os.path.join(dir_path, filename)
-                        break
-                        
-                if not json_file:
-                    return "Error: No JSON files found in the uploaded content"
-        else:
-            # Find all JSON files in TMP_DIR if no file_path provided
-            json_files = list(TMP_DIR.glob("**/*.json"))
-            if not json_files:
-                # If no JSON files are found, look for any files that might be JSON
-                potential_files = list(TMP_DIR.glob("**/*"))
-                if potential_files:
-                    return f"Error: No JSON files found in upload directory. Found these files instead: {[f.name for f in potential_files]}"
-                else:
-                    return "Error: No files found in upload directory"
+            print(f"Processing JSON file: {json_file}")
             
-            # Use the first JSON file found
-            json_file = str(json_files[0])
-        
-        # Verify file exists before proceeding
-        if not os.path.exists(json_file):
-            return f"Error: JSON file not found at path: {json_file}"
+            # Counter for target key occurrences
+            key_count = 0
             
-        print(f"Processing JSON file: {json_file}")
-        
-        # Counter for target key occurrences
-        key_count = 0
-        
-        # Recursive function to traverse JSON structure with a more robust approach
-        def count_key_occurrences(data):
-            nonlocal key_count
-            
-            if isinstance(data, dict):
-                # Check keys at this level - we need to convert the key to string if it's not already
-                # This handles cases where keys are numbers or other non-string types
-                for key in data:
-                    # The bug fix: stringify the key before comparison to handle non-string keys
-                    if str(key) == target_key:
-                        key_count += 1
+            # Recursive function to traverse JSON structure with a more robust approach
+            def count_key_occurrences(data):
+                nonlocal key_count
                 
-                # Recursively check values
-                for value in data.values():
-                    count_key_occurrences(value)
+                if isinstance(data, dict):
+                    # Check keys at this level - convert the key to string if it's not already
+                    for key in data:
+                        # Stringify the key before comparison to handle non-string keys
+                        if str(key) == target_key:
+                            key_count += 1
                     
-            elif isinstance(data, list):
-                # Recursively check each item in the list
-                for item in data:
-                    count_key_occurrences(item)
-        
-        # Load the JSON file
-        with open(json_file, 'r') as f:
-            data = json.load(f)
-        
-        # Start recursively counting
-        count_key_occurrences(data)
-        
-        return key_count
-        
+                    # Recursively check values
+                    for value in data.values():
+                        count_key_occurrences(value)
+                        
+                elif isinstance(data, list):
+                    # Recursively check each item in the list
+                    for item in data:
+                        count_key_occurrences(item)
+            
+            # Load the JSON file
+            with open(json_file, 'r') as f:
+                data = json.load(f)
+            
+            # Start recursively counting
+            count_key_occurrences(data)
+            
+            return key_count
+            
     except FileNotFoundError as e:
         return f"Error: JSON file not found - {str(e)}"
     except json.JSONDecodeError as e:
@@ -3330,7 +2991,19 @@ def extract_nested_json_keys(file_path=None, target_key="TQG"):
     except Exception as e:
         return f"Error processing JSON file: {str(e)}"
 
-def duckdb_social_media_interactions(Time,Comments,Stars):
+
+def duckdb_social_media_interactions(Time, Comments, Stars):
+    """
+    Generates a DuckDB SQL query for filtering social media interactions.
+    
+    Args:
+        Time (str): Timestamp to filter by
+        Comments (int): Number of comments to look for
+        Stars (int): Minimum star rating to filter by
+        
+    Returns:
+        str: A SQL query string for DuckDB
+    """
     query = f"""
       SELECT post_id
       FROM (
@@ -3350,17 +3023,15 @@ def duckdb_social_media_interactions(Time,Comments,Stars):
     """
     return query
 
-
 def transcribe_a_youtube_video():
     return ""
-
 
 def reconstruct_an_image(scrambled_image_path=None):
     """
     Reconstructs a jigsaw puzzle image using predefined mapping data.
     
     Args:
-        scrambled_image_path (str): Path to the scrambled jigsaw image
+        scrambled_image_path (str): Path or URL to the scrambled jigsaw image
         
     Returns:
         str: Base64 encoded string of the reconstructed image
@@ -3369,88 +3040,141 @@ def reconstruct_an_image(scrambled_image_path=None):
     import io
     import base64
     from PIL import Image
-    from utils.file_process import TMP_DIR
+    from utils.file_process import managed_file_upload
     
     try:
-        # Find the image file
-        actual_path = None
-        
-        # First, try a direct file path if it exists
-        if scrambled_image_path and os.path.exists(scrambled_image_path):
-            actual_path = scrambled_image_path
-        
-        # If no valid path provided, search in TMP_DIR for image files
-        if not actual_path:
-            # Search recursively for any image file
-            image_files = []
-            for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']:
-                image_files.extend(list(TMP_DIR.glob(f"**/*{ext}")))
+        # Use managed_file_upload to handle both URLs and local files
+        with managed_file_upload(scrambled_image_path) as (extract_dir, filenames):
+            # Check if we got an error message instead of a directory
+            if isinstance(extract_dir, str) and extract_dir.startswith("Error"):
+                return extract_dir
             
-            if image_files:
-                actual_path = str(image_files[0])
-            else:
-                # If still not found, look in current directory
-                for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']:
-                    current_dir_files = list(Path('.').glob(f"*{ext}"))
-                    if current_dir_files:
-                        actual_path = str(current_dir_files[0])
-                        break
-        
-        # If no image found anywhere, return error
-        if not actual_path:
-            return "Error: Could not find any image file to reconstruct"
-        
-        print(f"Using image file: {actual_path}")
-        
-        # Load the scrambled image
-        scrambled_image = Image.open(actual_path)
-
-        # Define the mapping data
-        mapping_data = [
-            (2, 1, 0, 0), (1, 1, 0, 1), (4, 1, 0, 2), (0, 3, 0, 3), (0, 1, 0, 4),
-            (1, 4, 1, 0), (2, 0, 1, 1), (2, 4, 1, 2), (4, 2, 1, 3), (2, 2, 1, 4),
-            (0, 0, 2, 0), (3, 2, 2, 1), (4, 3, 2, 2), (3, 0, 2, 3), (3, 4, 2, 4),
-            (1, 0, 3, 0), (2, 3, 3, 1), (3, 3, 3, 2), (4, 4, 3, 3), (0, 2, 3, 4),
-            (3, 1, 4, 0), (1, 2, 4, 1), (1, 3, 4, 2), (0, 4, 4, 3), (4, 0, 4, 4)
-        ]
-
-        # Create a blank image for the reconstructed result
-        reconstructed_image = Image.new('RGB', (scrambled_image.width, scrambled_image.height))
-
-        # Loop through each mapping and place pieces in their original positions
-        piece_size = scrambled_image.width // 5  # Each piece is assumed to be square
-        for original_row, original_col, scrambled_row, scrambled_col in mapping_data:
-            # Calculate coordinates of the scrambled piece
-            left = scrambled_col * piece_size
-            upper = scrambled_row * piece_size
-            right = left + piece_size
-            lower = upper + piece_size
-
-            # Crop the piece from the scrambled image
-            piece = scrambled_image.crop((left, upper, right, lower))
-
-            # Calculate coordinates for placing the piece in the reconstructed image
-            dest_left = original_col * piece_size
-            dest_upper = original_row * piece_size
-
-            # Paste the piece into its correct position
-            reconstructed_image.paste(piece, (dest_left, dest_upper))
-
-        # Save the reconstructed image to a bytes buffer instead of a file
-        buffer = io.BytesIO()
-        reconstructed_image.save(buffer, format='PNG')
-        
-        # Get the bytes from the buffer and encode them as base64
-        img_bytes = buffer.getvalue()
-        base64_encoded_image = base64.b64encode(img_bytes).decode('utf-8')
-        
-        return base64_encoded_image
-        
+            if not filenames:
+                return "Error: No files found in the uploaded content"
+            
+            # Look for image files in the extracted content
+            image_file = None
+            for filename in filenames:
+                lower_filename = filename.lower()
+                if any(lower_filename.endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']):
+                    image_file = os.path.join(extract_dir, filename)
+                    break
+            
+            # If no specific image file found, use the first file
+            if not image_file:
+                image_file = os.path.join(extract_dir, filenames[0])
+            
+            print(f"Using image file: {image_file}")
+            
+            # Load the scrambled image
+            scrambled_image = Image.open(image_file)
+    
+            # Define the mapping data
+            mapping_data = [
+                (2, 1, 0, 0), (1, 1, 0, 1), (4, 1, 0, 2), (0, 3, 0, 3), (0, 1, 0, 4),
+                (1, 4, 1, 0), (2, 0, 1, 1), (2, 4, 1, 2), (4, 2, 1, 3), (2, 2, 1, 4),
+                (0, 0, 2, 0), (3, 2, 2, 1), (4, 3, 2, 2), (3, 0, 2, 3), (3, 4, 2, 4),
+                (1, 0, 3, 0), (2, 3, 3, 1), (3, 3, 3, 2), (4, 4, 3, 3), (0, 2, 3, 4),
+                (3, 1, 4, 0), (1, 2, 4, 1), (1, 3, 4, 2), (0, 4, 4, 3), (4, 0, 4, 4)
+            ]
+    
+            # Create a blank image for the reconstructed result
+            reconstructed_image = Image.new('RGB', (scrambled_image.width, scrambled_image.height))
+    
+            # Loop through each mapping and place pieces in their original positions
+            piece_size = scrambled_image.width // 5  # Each piece is assumed to be square
+            for original_row, original_col, scrambled_row, scrambled_col in mapping_data:
+                # Calculate coordinates of the scrambled piece
+                left = scrambled_col * piece_size
+                upper = scrambled_row * piece_size
+                right = left + piece_size
+                lower = upper + piece_size
+    
+                # Crop the piece from the scrambled image
+                piece = scrambled_image.crop((left, upper, right, lower))
+    
+                # Calculate coordinates for placing the piece in the reconstructed image
+                dest_left = original_col * piece_size
+                dest_upper = original_row * piece_size
+    
+                # Paste the piece into its correct position
+                reconstructed_image.paste(piece, (dest_left, dest_upper))
+    
+            # Save the reconstructed image to a bytes buffer instead of a file
+            buffer = io.BytesIO()
+            reconstructed_image.save(buffer, format='PNG')
+            
+            # Get the bytes from the buffer and encode them as base64
+            img_bytes = buffer.getvalue()
+            base64_encoded_image = base64.b64encode(img_bytes).decode('utf-8')
+            
+            return base64_encoded_image
+            
     except Exception as e:
         # Return detailed error message with troubleshooting info
         import traceback
         error_details = traceback.format_exc()
         return f"Error reconstructing image: {str(e)}\nDetails: {error_details}"
+
+def multi_cursor_edits_to_convert_to_json(file_path: str) -> str:
+    """
+    Reads a file containing key=value pairs, converts it into a JSON object,
+    and calculates the SHA-256 hash of the JSON object.
+
+    Args:
+        file_path (str): Path or URL to the file containing key=value pairs.
+
+    Returns:
+        str: SHA-256 hash of the JSON object.
+    """
+    import os
+    import json
+    import hashlib
+    from utils.file_process import managed_file_upload
+    
+    try:
+        # Use managed_file_upload to handle both URLs and local files
+        with managed_file_upload(file_path) as (extract_dir, filenames):
+            # Check if we got an error message instead of a directory
+            if isinstance(extract_dir, str) and extract_dir.startswith("Error"):
+                return extract_dir
+            
+            if not filenames:
+                return "Error: No files found in the uploaded content"
+            
+            # Use the first text file or any file available
+            txt_file = None
+            for filename in filenames:
+                if filename.endswith('.txt'):
+                    txt_file = os.path.join(extract_dir, filename)
+                    break
+            
+            # If no specific .txt file found, use the first file
+            if not txt_file:
+                txt_file = os.path.join(extract_dir, filenames[0])
+            
+            result = {}
+            
+            # Read the file and process key=value pairs
+            with open(txt_file, 'r', encoding='utf-8') as file:
+                for line in file:
+                    line = line.strip()
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        result[key.strip()] = value.strip()
+    
+            # Convert the result dictionary to a JSON string with no whitespace
+            json_data = json.dumps(result, separators=(',', ':'))
+    
+            # Calculate the SHA-256 hash of the JSON string
+            hash_object = hashlib.sha256(json_data.encode('utf-8'))
+            hash_hex = hash_object.hexdigest()
+    
+            return hash_hex
+    
+    except Exception as e:
+        return f"Error processing file: {str(e)}"
+
 
 functions_dict = {
     "vs_code_version": vs_code_version,
