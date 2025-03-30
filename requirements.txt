@@ -8,36 +8,35 @@ python-multipart
 # Data processing
 numpy
 scikit-learn
-scipy  # Required by scikit-learn
+scipy 
 pandas
-python-dateutil.post0  # Required by pandas
-six  # Required by python-dateutil
-tzdata Required by pandas
-
+python-dateutil  # Fixed: removed incorrect .post0 suffix
+six
+tzdata
 
 # Image handling
 Pillow
 
 # Time zones and date handling
-pytz# Geolocation
+pytz 
 geopy
 
 # RSS feed parsing
-# feedparser  # Not compatible with Python 3.13 (uses removed cgi module)
-atoma  # Alternative RSS/Atom parser compatible with Python 3.13
+atoma
 
 # HTML parsing
-bs4
 beautifulsoup4
 
 # Document processing
-PyPDF2  # PDF processing and text extraction
+PyPDF2
 
 # Environment management
 python-dotenv
 
-lxml  # XML/HTML processing library, needed for HTML table parsing
+# XML processing
+lxml
 
+# Text processing
 fuzzywuzzy
 python-Levenshtein
 python-jose[cryptography]
