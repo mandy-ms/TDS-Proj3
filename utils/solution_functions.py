@@ -3067,15 +3067,6 @@ def clean_up_sales_data(file_path, product, city, min_units):
     """
     Cleans up sales data from a JSON file, correcting city names through fuzzy matching, 
     and calculates total sales for a specific product in a specific city above a minimum units threshold.
-    
-    Parameters:
-        file_path (str): Path to the JSON file containing sales data
-        product (str): The product to filter by
-        city (str): The city to filter by
-        min_units (int): Minimum units per transaction to include
-        
-    Returns:
-        int: Total sales meeting the criteria or an error message
     """
     import os
     import glob
@@ -3116,7 +3107,27 @@ def clean_up_sales_data(file_path, product, city, min_units):
         with open(actual_path, 'r', encoding='utf-8') as file:
             data = json.load(file)
 
-        df = pd.DataFrame(data)
+        # Fix: More robust DataFrame creation with proper error handling
+        if isinstance(data, list):
+            df = pd.DataFrame(data)
+        elif isinstance(data, dict):
+            # Handle dictionary of arrays by normalizing lengths or converting to records
+            records = []
+            if all(isinstance(v, list) for v in data.values()):
+                # Find the maximum length of any array
+                max_length = max(len(arr) for arr in data.values())
+                
+                # Pad shorter arrays with None
+                normalized_data = {}
+                for key, values in data.items():
+                    normalized_data[key] = values + [None] * (max_length - len(values))
+                
+                df = pd.DataFrame(normalized_data)
+            else:
+                # If it's a dict but not of arrays, convert to a single-row DataFrame
+                df = pd.DataFrame([data])
+        else:
+            return "Error: Unsupported JSON data structure"
         
         # List of known city names for correction
         correct_cities = [
@@ -3153,6 +3164,9 @@ def clean_up_sales_data(file_path, product, city, min_units):
         return int(total_sales) if total_sales.is_integer() else total_sales
         
     except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"Error detail: {error_detail}")
         return f"Error processing sales data: {str(e)}"
 
 def parse_partial_json(file_path="sales_data.jsonl", key="sales", num_rows=100, regex_pattern=None):
