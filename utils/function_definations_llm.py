@@ -431,20 +431,29 @@ function_definitions_objects_llm = {
     },
 
     "write_a_fastapi_server_to_serve_data": {
-        "name": "write_a_fastapi_server_to_serve_data",
-        "description": "Creates a FastAPI server to serve student data from a CSV file and returns instructions for running the server",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "csv_path": {
-                    "type": "string",
-                    "description": "Path to the CSV file containing student data with columns: studentId, class",
-                    "default": "q-fastapi.csv"
-                }
+    "name": "write_a_fastapi_server_to_serve_data",
+    "description": "Creates and runs a FastAPI application that serves student data from a CSV file with filtering capabilities by class",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "csv_path": {
+                "type": "string",
+                "description": "Path to the CSV file containing student data. The CSV must have a 'class' column among other student data."
             },
-            "required": ['csv_path']
-        }
-    },
+            "host": {
+                "type": "string",
+                "description": "The host address to run the API on (e.g., '127.0.0.1', '0.0.0.0')",
+                "default": "127.0.0.1"
+            },
+            "port": {
+                "type": "integer",
+                "description": "The port number to run the API on (e.g., 8000, 8080)",
+                "default": 8000
+            }
+        },
+        "required": ["csv_path"]
+    }
+},
 
     "run_a_local_llm_with_llamafile": {
         "name": "run_a_local_llm_with_llamafile",
@@ -478,93 +487,72 @@ function_definitions_objects_llm = {
 
     "llm_token_cost": {
         "name": "llm_token_cost",
-        "description": "Calculate the token count for a prompt when processed by GPT-4o-Mini. This function uses the cl100k_base encoding to count tokens and accounts for additional message formatting overhead when sending requests to the API.",
+        "description": "Calculate the token count for text using OpenAI's GPT-4o-Mini model. This function sends the text to OpenAI's API and extracts the prompt token count from the response, which represents how many tokens the input text consumes.",
         "parameters": {
             "type": "object",
             "properties": {
-                "prompt": {
+                "text": {
                     "type": "string",
-                    "description": "The prompt to count tokens for. If None, uses a default example prompt containing a list of words to check for valid English words."
+                    "description": "The text content to analyze for token count. If not provided, defaults to an empty string."
                 }
             },
             "required": []
         }
     },
 
-    "generate_addresses_with_llms": {
-        "name": "generate_addresses_with_llms",
-        "description": "description",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "text": {
-                    "type": "string",
-                    "description": "The text to extract the data from"
-                }
-            },
-            "required": ["text"]
-        }
-    },
-
-    # Completed
-    "llm_vision": {
-    "name": "llm_vision",
-    "description": "Generate a JSON body for an OpenAI vision API request.",
+"generate_addresses_with_llms": {
+    "name": "generate_addresses_with_llms",
+    "description": "Creates a JSON request body for OpenAI API to generate structured address data. This function prepares a properly formatted request that will instruct the language model to generate realistic addresses for logistics and delivery route planning.",
     "parameters": {
         "type": "object",
         "properties": {
             "model": {
                 "type": "string",
-                "description": "The OpenAI model to use for vision processing. Default is 'gpt-4o-mini'."
+                "description": "The OpenAI model to use for generating addresses. Default is 'gpt-4o-mini'.",
+                "default": "gpt-4o-mini"
             },
-            "messages": {
-                "type": "array",
-                "description": "User messages containing both text and an image URL.",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "role": {
-                            "type": "string",
-                            "enum": ["user"],
-                            "description": "Role of the message sender."
-                        },
-                        "content": {
-                            "type": "array",
-                            "description": "Message content, including a text instruction and an image URL.",
-                            "items": {
-                                "oneOf": [
-                                    {
-                                        "type": "object",
-                                        "properties": {
-                                            "type": {"type": "string", "enum": ["text"]},
-                                            "text": {"type": "string", "description": "Instruction for the model."}
-                                        },
-                                        "required": ["type", "text"]
-                                    },
-                                    {
-                                        "type": "object",
-                                        "properties": {
-                                            "type": {"type": "string", "enum": ["image_url"]},
-                                            "image_url": {
-                                                "type": "object",
-                                                "properties": {
-                                                    "url": {"type": "string", "description": "URL of the image."}
-                                                },
-                                                "required": ["url"]
-                                            }
-                                        },
-                                        "required": ["type", "image_url"]
-                                    }
-                                ]
-                            }
-                        }
-                    },
-                    "required": ["role", "content"]
-                }
+            "count": {
+                "type": "integer",
+                "description": "Number of addresses to generate. Default is 10.",
+                "default": 10
+            },
+            "system_message": {
+                "type": "string",
+                "description": "System prompt instruction for the model. Default is 'Respond in JSON'.",
+                "default": "Respond in JSON"
+            },
+            "country": {
+                "type": "string",
+                "description": "Country to generate addresses for. Default is 'US'.",
+                "default": "US"
             }
         },
-        "required": ["model", "messages"]
+        "required": []
     }
+},
+
+    # Completed
+        "llm_vision": {
+        "name": "llm_vision",
+        "description": "Generate a JSON body for an OpenAI vision API request to analyze images. This function formats the request with a text prompt and an image URL, creating the proper structure required by OpenAI's API for combined text-and-image inputs.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "image_url": {
+                    "type": "string",
+                    "description": "URL to the image to be analyzed (can be a web URL or base64 data URL)."
+                },
+                "model": {
+                    "type": "string",
+                    "description": "The OpenAI model to use for vision processing. Default is 'gpt-4o-mini'."
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "The instruction to send to the model, such as 'Extract text from this image'. Default is 'Extract text from this image'."
+                }
+            },
+            "required": ["image_url"]
+        }
     },
 
     # Completed
@@ -596,20 +584,24 @@ function_definitions_objects_llm = {
             "required": []
         },
 
-    "vector_databases": {
-        "name": "vector_databases",
-        "description": "description",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "text": {
-                    "type": "string",
-                    "description": "The text to extract the data from"
-                }
-            },
-            "required": ["text"]
-        }
-    },
+        "vector_databases": {
+            "name": "vector_databases",
+            "description": "Creates and runs a FastAPI application that provides a semantic search API using vector embeddings. This function sets up an endpoint that accepts document texts and a query, calculates similarity using text embeddings, and returns the most similar documents.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {
+                        "type": "string",
+                        "description": "The host address to run the API on (default: '127.0.0.1')"
+                    },
+                    "port": {
+                        "type": "integer",
+                        "description": "The port number to run the API on (default: 8000)"
+                    }
+                },
+                "required": []
+            }
+        },
 
     "function_calling": {
         "name": "function_calling",
@@ -635,13 +627,8 @@ function_definitions_objects_llm = {
         "description": "description",
         "parameters": {
             "type": "object",
-            "properties": {
-                "text": {
-                    "type": "string",
-                    "description": "The text to extract the data from"
-                }
-            },
-            "required": ["text"]
+            "properties": {},
+            "required": []
         }
     },
 
@@ -718,19 +705,24 @@ function_definitions_objects_llm = {
     },
 
     "find_the_bounding_box_of_a_city": {
-        "name": "find_the_bounding_box_of_a_city",
-        "description": "Retrieves the minimum latitude of the bounding box for a specified city using the Nominatim geocoder API.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "city_name": {
-                    "type": "string",
-                    "description": "The name of the city to geocode (e.g., 'Mumbai', 'Tokyo')."
-                }
+    "name": "find_the_bounding_box_of_a_city",
+    "description": "Retrieves the minimum or maximum latitude of the bounding box for a specified city using geocoding",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "city_name": {
+                "type": "string",
+                "description": "The name of the city to geocode (e.g., 'Mexico City', 'New York', 'Tokyo')"
             },
-            "required": ["city_name"]
-        }
-    },
+            "bound_type": {
+                "type": "string",
+                "description": "Type of boundary to return - 'minimum' or 'maximum'",
+                "enum": ["minimum", "maximum"]
+            }
+        },
+        "required": ["city_name", "bound_type"]
+    }
+},
 
     "search_hacker_news": {
     "name": "search_hacker_news",
@@ -848,16 +840,31 @@ function_definitions_objects_llm = {
 
     "clean_up_excel_sales_data": {
         "name": "clean_up_excel_sales_data",
-        "description": "description",
+        "description": "Cleans messy sales data from Excel files and calculates margins for filtered transactions. This function standardizes country codes, normalizes text fields, handles date format inconsistencies, extracts product names from compound fields, and calculates sales margins for transactions matching specified criteria.",
         "parameters": {
             "type": "object",
             "properties": {
-                "text": {
+                "file_path": {
                     "type": "string",
-                    "description": "The text to extract the data from"
+                    "description": "Path to the Excel file containing sales data. If not provided, the function will search for Excel files in common locations."
+                },
+                "cutoff_date": {
+                    "type": "string",
+                    "description": "ISO 8601 date string to filter transactions (inclusive). Only transactions on or before this date will be included.",
+                    "default": "2022-11-24T11:42:27+05:30"
+                },
+                "product_name": {
+                    "type": "string",
+                    "description": "Product name to filter by. For compound product fields with slashes, only the part before the slash is used.",
+                    "default": "Kappa"
+                },
+                "country_code": {
+                    "type": "string",
+                    "description": "Country code to filter by after standardization (e.g., 'BR', 'US'). The function standardizes various country formats to consistent codes.",
+                    "default": "BR"
                 }
             },
-            "required": ["text"]
+            "required": []
         }
     },
 
@@ -1049,16 +1056,16 @@ function_definitions_objects_llm = {
 
     "reconstruct_an_image": {
         "name": "reconstruct_an_image",
-        "description": "description",
+        "description": "Reconstructs a jigsaw puzzle image using predefined mapping data and returns the result as a Base64 encoded string",
         "parameters": {
             "type": "object",
             "properties": {
-                "text": {
+                "scrambled_image_path": {
                     "type": "string",
-                    "description": "The text to extract the data from"
+                    "description": "Path to the scrambled jigsaw image file (supported formats: PNG, JPEG, WebP)",
                 }
             },
-            "required": ["text"]
+            "required": ["scrambled_image_path"]
         }
-    },
+    }
 }

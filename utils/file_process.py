@@ -2,49 +2,97 @@ import os
 import zipfile
 import tempfile
 import shutil
+import uuid
 from pathlib import Path
+from contextlib import contextmanager
 from PIL import Image  # Still needed for image validation if desired
+
+# Single directory for all temporary files
+TMP_DIR = Path("/tmp") if os.environ.get("VERCEL") else Path("tmp_uploads")
+
+@contextmanager
+def managed_file_upload(file_path):
+    """
+    Context manager that processes an uploaded file and cleans up after it's used.
+    
+    Args:
+        file_path: Path to the uploaded file
+        
+    Yields:
+        tuple: (directory path, list of filenames)
+    """
+    file_path = Path(file_path)
+    output_dir = None
+    filenames = []
+    
+    try:
+        # Create unique session ID to avoid filename conflicts
+        session_id = str(uuid.uuid4())[:8]
+        
+        # Ensure tmp directory exists
+        os.makedirs(TMP_DIR, exist_ok=True)
+        
+        if zipfile.is_zipfile(file_path):
+            # Handle ZIP file
+            output_dir = TMP_DIR / f"zip_{session_id}"
+            os.makedirs(output_dir, exist_ok=True)
+            
+            with zipfile.ZipFile(file_path, "r") as zip_ref:
+                zip_ref.extractall(output_dir)
+                filenames = zip_ref.namelist()
+        else:
+            # Handle single file
+            output_dir = TMP_DIR
+            dest_path = output_dir / f"{session_id}_{file_path.name}"
+            shutil.copy2(file_path, dest_path)
+            filenames = [dest_path.name]
+        
+        # Yield the results for the caller to use
+        yield str(output_dir), filenames
+        
+    finally:
+        # Clean up after use
+        if output_dir and output_dir.exists() and output_dir != TMP_DIR:
+            shutil.rmtree(output_dir)
+        elif output_dir == TMP_DIR:
+            # Just remove the specific files we created, not the whole directory
+            for filename in filenames:
+                file_to_remove = output_dir / filename
+                if file_to_remove.exists():
+                    os.remove(file_to_remove)
 
 def process_uploaded_file(file_path):
     """
-    Process any uploaded file. Extracts ZIP files, copies all other files.
-    Returns the directory where files are extracted or saved and a list of file names.
+    Legacy function for backward compatibility.
+    Processes uploaded files and returns paths without automatic cleanup.
+    
+    Args:
+        file_path: Path to the uploaded file
+        
+    Returns:
+        tuple: (directory path, list of filenames)
     """
     file_path = Path(file_path)
-
-    if not file_path.exists():
-        raise FileNotFoundError(f"File not found: {file_path}")
-
-    # Check if the file is a ZIP file
+    
+    # Ensure tmp directory exists
+    os.makedirs(TMP_DIR, exist_ok=True)
+    
+    # Generate a unique session ID
+    session_id = str(uuid.uuid4())[:8]
+    
     if zipfile.is_zipfile(file_path):
         # Handle ZIP file
-        return _unzip_file(file_path)
+        output_dir = TMP_DIR / f"zip_{session_id}"
+        os.makedirs(output_dir, exist_ok=True)
+        
+        with zipfile.ZipFile(file_path, "r") as zip_ref:
+            zip_ref.extractall(output_dir)
+            filenames = zip_ref.namelist()
+        
+        return str(output_dir), filenames
     else:
-        # Handle any other file type
-        file_extension = file_path.suffix.lower().lstrip('.')
+        # Handle single file - put everything in the same directory
+        dest_path = TMP_DIR / f"{session_id}_{file_path.name}"
+        shutil.copy2(file_path, dest_path)
         
-        # Create directory based on file extension
-        base_tmp_dir = Path(f"tmp_uploads/{file_extension}")
-        os.makedirs(base_tmp_dir, exist_ok=True)
-        
-        # Save the file
-        saved_file_path = base_tmp_dir / file_path.name
-        shutil.copy2(file_path, saved_file_path)
-        
-        return str(base_tmp_dir), [file_path.name]
-
-def _unzip_file(zip_path):
-    """
-    Helper function to extract a ZIP file.
-    """
-    # Create a temporary directory inside tmp_uploads
-    base_tmp_dir = Path("tmp_uploads/zips")
-    os.makedirs(base_tmp_dir, exist_ok=True)
-    extract_to = Path(tempfile.mkdtemp(dir=base_tmp_dir))
-
-    with zipfile.ZipFile(zip_path, "r") as zip_ref:
-        zip_ref.extractall(extract_to)
-        extracted_files = zip_ref.namelist()
-
-    # Return the directory where files are extracted and the list of file names
-    return str(extract_to), extracted_files
+        return str(TMP_DIR), [dest_path.name]
