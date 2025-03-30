@@ -1258,7 +1258,6 @@ def push_an_image_to_docker_hub(tag: str) -> str:
         return f"Error: {str(e)}"
 
 
-
 def write_a_fastapi_server_to_serve_data(csv_path, host: str = "127.0.0.1", port: int = 8000) -> str:
     """
     Creates and runs a FastAPI application that serves student data from a CSV file.
@@ -1282,19 +1281,28 @@ def write_a_fastapi_server_to_serve_data(csv_path, host: str = "127.0.0.1", port
     from fastapi.middleware.cors import CORSMiddleware
     import uvicorn
     
-    # Check if port is already in use
-    def is_port_in_use(port):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            return s.connect_ex(('localhost', port)) == 0
+    # Check if running on Scalingo or another cloud platform
+    is_scalingo = os.environ.get("SCALINGO_ENVIRONMENT") is not None
+    is_cloud = is_scalingo or os.environ.get("VERCEL") or os.environ.get("HEROKU_APP_NAME")
     
-    # Find an available port if the specified one is in use
-    original_port = port
-    while is_port_in_use(port):
-        print(f"Port {port} is already in use, trying next port")
-        port += 1
+    # For cloud deployments, use the environment-provided port
+    if is_cloud:
+        port = int(os.environ.get("PORT", port))
     
-    if original_port != port:
-        print(f"Using port {port} instead of {original_port}")
+    # Check if port is already in use (only for local development)
+    if not is_cloud:
+        def is_port_in_use(port):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                return s.connect_ex(('localhost', port)) == 0
+        
+        # Find an available port if the specified one is in use
+        original_port = port
+        while is_port_in_use(port):
+            print(f"Port {port} is already in use, trying next port")
+            port += 1
+        
+        if original_port != port:
+            print(f"Using port {port} instead of {original_port}")
     
     # Check multiple possible locations for the CSV file
     possible_paths = [
@@ -1363,11 +1371,17 @@ def write_a_fastapi_server_to_serve_data(csv_path, host: str = "127.0.0.1", port
         except Exception as e:
             return {"error": str(e)}
     
-    # Construct the URL where the API will be available
-    api_url = f"http://localhost:{port}/api"
+    # Construct the appropriate URL based on environment
+    if is_scalingo:
+        # Get the Scalingo app name from environment
+        app_name = os.environ.get("SCALINGO_APP_NAME", "")
+        api_url = f"https://{app_name}.osc-fr1.scalingo.io/api"
+        print(f"Running on Scalingo at: {api_url}")
+    else:
+        # Local development URL
+        api_url = f"http://{host}:{port}/api"
+        print(f"Starting student API server at: {api_url}")
     
-    # Print a message with the URL and example usage
-    print(f"Starting student API server at: {api_url}")
     print(f"Example usage: {api_url}?class=1A&class=1B")
     print(f"Using CSV file at: {actual_path}")
     
@@ -1376,7 +1390,7 @@ def write_a_fastapi_server_to_serve_data(csv_path, host: str = "127.0.0.1", port
         try:
             uvicorn_config = uvicorn.Config(
                 app=app,
-                host=host,
+                host="0.0.0.0" if is_cloud else host,  # Use 0.0.0.0 in cloud environments
                 port=port,
                 log_level="info"
             )
@@ -1393,6 +1407,7 @@ def write_a_fastapi_server_to_serve_data(csv_path, host: str = "127.0.0.1", port
     
     # Return the API URL
     return api_url
+
 
 def run_a_local_llm_with_llamafile():
     return ""
