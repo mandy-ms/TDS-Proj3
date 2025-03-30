@@ -18,21 +18,20 @@ os.makedirs(tmp_dir, exist_ok=True)
 app = FastAPI()
 
 
-@app.get("/test")
+@app.get("/")
 def fun():
     return "works"
 
 SECRET_PASSWORD = os.getenv("SECRET_PASSWORD")
 
+# Modify the redeploy endpoint
 @app.get('/redeploy')
 def redeploy(password: str = Query(None)):
-    print(password)
-    print(SECRET_PASSWORD)
     if password != SECRET_PASSWORD:
         raise HTTPException(status_code=403, detail="Unauthorized")
-
-    subprocess.run(["../redeploy.sh"], shell=True)
-    return {"message": "Redeployment triggered!"}
+    
+    # Replace shell script execution with a message
+    return {"message": "Redeployment not available in cloud environment"}
 
 
 async def save_upload_file(upload_file: UploadFile) -> str:
