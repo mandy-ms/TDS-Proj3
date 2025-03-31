@@ -42,7 +42,7 @@ async def save_upload_file(upload_file: UploadFile) -> str:
     return file_path
 
 
-@app.post("/")
+@app.post("/api")
 async def process_file(
     question: str = Form(...),
     file: Optional[UploadFile] = File(None)
